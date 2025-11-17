@@ -2,7 +2,7 @@
 
 
 ## Description
-A comprehensive multi-layered analysis system for COVID-19 data that integrates data collection, validation, statistical reasoning, and governance reporting. This project provides actionable insights into pandemic impacts across different regions through interactive visualizations and policy simulation tools.
+A comprehensive multi-layered analysis system for COVID-19 data that integrates data collection, validation, statistical reasoning, and governance reporting. This project provides actionable insights into pandemic impacts across different regions through interactive visualizations.
 
 ## Project Structure
 ├── Barnabus/
