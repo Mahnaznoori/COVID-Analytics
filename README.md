@@ -128,10 +128,10 @@ URL: https://raw.githubusercontent.com/owid/covid-19-data/refs/heads/master/publ
 
 
 Sample Insights
-# Regional Disparities: Identified significant differences in death rates between WHO regions
-# Vaccine Impact: Quantified 10% vaccination rate improvement leads to 7% reduction in death rates
-# Anomaly Detection: Flagged 237 data anomalies requiring investigation
-# Health System Correlation: Strong correlation (r=0.78) between hospital bed availability and mortality rates
+Regional Disparities: Identified significant differences in death rates between WHO regions
+Vaccine Impact: Quantified 10% vaccination rate improvement leads to 7% reduction in death rates
+Anomaly Detection: Flagged 237 data anomalies requiring investigation
+Health System Correlation: Strong correlation (r=0.78) between hospital bed availability and mortality rates
 # License
 This project is licensed under the MIT License - see the LICENSE file for details.
 
@@ -145,7 +145,7 @@ Contact
 # Mahnaz Nouri
 
 GitHub: Mahnaznoori
-Email: mahnaznoori@gmail.com 
+Email: mahnaznoori@gmail.com ;
       Mahnaznouri1981@gmail.com
       
 # Project Link: https://github.com/Mahnaznoori/COVID-Analytics
