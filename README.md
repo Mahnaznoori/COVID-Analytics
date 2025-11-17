@@ -126,7 +126,6 @@ URL: https://health.google.com/covid-19/open-data/raw-data
 URL: https://raw.githubusercontent.com/owid/covid-19-data/refs/heads/master/public/data/owid-covid-data.csv
 
 
-
 # Sample Insights
 Regional Disparities: Identified significant differences in death rates between WHO regions
 Vaccine Impact: Quantified 10% vaccination rate improvement leads to 7% reduction in death rates
@@ -137,7 +136,6 @@ Health System Correlation: Strong correlation (r=0.78) between hospital bed avai
 
 # License
 This project is licensed under the MIT License - see the LICENSE file for details.
-
 
 # Contributing
 Fork the repository
@@ -153,11 +151,13 @@ GitHub: Mahnaznoori
 Email: mahnaznoori@gmail.com ;
       Mahnaznouri1981@gmail.com
       
-# Project Link: https://github.com/Mahnaznoori/COVID-Analytics
-Acknowledgments
-# World Bank for socio-economic indicators
-# Google Health for COVID-19 open data
-# Our World in Data for comprehensive datasets
+# Project Link:
+https://github.com/Mahnaznoori/COVID-Analytics
+
+# Acknowledgments
+World Bank for socio-economic indicators
+Google Health for COVID-19 open data
+Our World in Data for comprehensive datasets
 
 
 
