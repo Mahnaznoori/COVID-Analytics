@@ -118,12 +118,9 @@ gitpython==3.1.31
 # Data Sources
 Data_Collection
 🌍 COVID-19 Analytics: Multi-source (World Bank + Google + github) time series, regression &amp; interactive dashboard
-# World Bank Indicators: Socio-economic and health system data
-URL: https://databank.worldbank.org/home
-# Google COVID-19 Open Data: Daily COVID-19 statistics
-URL: https://health.google.com/covid-19/open-data/raw-data
-# Our World in Data (OWID): Comprehensive COVID-19 dataset
-URL: https://raw.githubusercontent.com/owid/covid-19-data/refs/heads/master/public/data/owid-covid-data.csv
+World Bank Indicators: Socio-economic and health system data (URL: https://databank.worldbank.org/home)
+Google COVID-19 Open Data: Daily COVID-19 statistics (URL: https://health.google.com/covid-19/open-data/raw-data)
+Our World in Data (OWID): Comprehensive COVID-19 dataset (URL: https://raw.githubusercontent.com/owid/covid-19-data/refs/heads/master/public/data/owid-covid-data.csv)
 
 
 # Sample Insights
