@@ -1,0 +1,577 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Nov  8 15:57:38 2025
+
+@author: ASUS
+"""
+
+import pandas as pd
+import numpy as np
+import os
+from datetime import datetime
+
+def load_local_covid_data():
+    """
+    Load COVID-19 death data from local Excel file
+    """
+    file_path = r"C:\Users\ASUS\Desktop\Barnabus\Data\Covid19Data.xlsx"
+    
+    print(f"Loading COVID-19 death data from {file_path}...")
+    try:
+        # Read the Excel file
+        df = pd.read_excel(file_path)
+        print(f"Successfully loaded data. Shape: {df.shape}")
+        
+        # Check if required columns exist
+        required_columns = ['location', 'date', 'new_deaths', 'total_deaths']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            print(f"Warning: Missing columns in Excel file: {missing_columns}")
+            print(f"Available columns: {list(df.columns)}")
+            return None
+        
+        # Extract only required columns
+        df = df[required_columns].copy()
+        
+        # Convert date column to datetime
+        df['date'] = pd.to_datetime(df['date'])
+        
+        return df
+    except Exception as e:
+        print(f"Error loading Excel file: {str(e)}")
+        return None
+
+def load_existing_data(file_path):
+    """
+    Load the existing combined COVID and World Bank data
+    """
+    print(f"Loading existing data from {file_path}...")
+    try:
+        df = pd.read_csv(file_path)
+        print(f"Successfully loaded data. Shape: {df.shape}")
+        
+        # Convert date column to datetime if it exists
+        if 'date' in df.columns:
+            df['date'] = pd.to_datetime(df['date'])
+        
+        return df
+    except Exception as e:
+        print(f"Error loading data: {str(e)}")
+        return None
+
+def merge_data(existing_df, death_df):
+    """
+    Merge death data with existing data using multiple matching strategies
+    """
+    print("Merging death data with existing data...")
+    
+    # Check if required columns exist
+    if 'date' not in existing_df.columns:
+        print("Error: 'date' column not found in existing data")
+        return None
+    
+    if 'date' not in death_df.columns:
+        print("Error: 'date' column not found in death data")
+        return None
+    
+    # Make a copy of the existing dataframe to avoid modifying the original
+    result_df = existing_df.copy()
+    
+    # Add new columns for death data
+    result_df['new_deaths'] = np.nan
+    result_df['total_deaths'] = np.nan
+    
+    # Check if required country columns exist in existing data
+    if 'country_name' not in existing_df.columns:
+        print("Error: 'country_name' column not found in existing data")
+        return None
+    
+    if 'iso_3166_1_alpha_3' not in existing_df.columns:
+        print("Error: 'iso_3166_1_alpha_3' column not found in existing data")
+        return None
+    
+    # Convert date columns to datetime if not already
+    if not pd.api.types.is_datetime64_any_dtype(result_df['date']):
+        result_df['date'] = pd.to_datetime(result_df['date'])
+    
+    if not pd.api.types.is_datetime64_any_dtype(death_df['date']):
+        death_df['date'] = pd.to_datetime(death_df['date'])
+    
+    # Create dictionaries for faster lookup
+    # Dictionary 1: (date, location) -> (new_deaths, total_deaths)
+    death_dict1 = {}
+    for _, row in death_df.iterrows():
+        key = (row['date'], row['location'])
+        death_dict1[key] = (row['new_deaths'], row['total_deaths'])
+    
+    # Dictionary 2: (date, iso_code) -> (new_deaths, total_deaths) if iso_code exists
+    death_dict2 = {}
+    if 'iso_code' in death_df.columns:
+        for _, row in death_df.iterrows():
+            if pd.notna(row['iso_code']):
+                key = (row['date'], row['iso_code'])
+                death_dict2[key] = (row['new_deaths'], row['total_deaths'])
+        print(f"Created secondary dictionary using 'iso_code' with {len(death_dict2)} entries")
+    else:
+        print("Warning: 'iso_code' column not found in death data. Using only location matching.")
+    
+    # Create a mapping from country_name to iso_code in existing data
+    country_to_iso = {}
+    for _, row in existing_df.iterrows():
+        if pd.notna(row['country_name']) and pd.notna(row['iso_3166_1_alpha_3']):
+            country_to_iso[row['country_name']] = row['iso_3166_1_alpha_3']
+    
+    print(f"Created country-to-ISO mapping with {len(country_to_iso)} entries")
+    
+    # Statistics counters
+    matched_by_location = 0
+    matched_by_iso = 0
+    total_records = len(result_df)
+    
+    # Now merge the data
+    for idx, row in result_df.iterrows():
+        date = row['date']
+        country_name = row['country_name']
+        iso_code = row['iso_3166_1_alpha_3']
+        
+        # Strategy 1: Match by date and location (country_name)
+        key1 = (date, country_name)
+        if key1 in death_dict1:
+            new_deaths, total_deaths = death_dict1[key1]
+            result_df.at[idx, 'new_deaths'] = new_deaths
+            result_df.at[idx, 'total_deaths'] = total_deaths
+            matched_by_location += 1
+            continue
+        
+        # Strategy 2: Match by date and iso_code
+        if pd.notna(iso_code):
+            key2 = (date, iso_code)
+            if key2 in death_dict2:
+                new_deaths, total_deaths = death_dict2[key2]
+                result_df.at[idx, 'new_deaths'] = new_deaths
+                result_df.at[idx, 'total_deaths'] = total_deaths
+                matched_by_iso += 1
+                continue
+        
+        # Strategy 3: Try to match using country_name to find iso_code and then match
+        if country_name in country_to_iso:
+            mapped_iso = country_to_iso[country_name]
+            key3 = (date, mapped_iso)
+            if key3 in death_dict2:
+                new_deaths, total_deaths = death_dict2[key3]
+                result_df.at[idx, 'new_deaths'] = new_deaths
+                result_df.at[idx, 'total_deaths'] = total_deaths
+                matched_by_iso += 1
+                continue
+    
+    # Print statistics about the merge
+    non_null_new_deaths = result_df['new_deaths'].notna().sum()
+    non_null_total_deaths = result_df['total_deaths'].notna().sum()
+    
+    print(f"\nMerge statistics:")
+    print(f"Total records: {total_records}")
+    print(f"Records matched by location: {matched_by_location} ({matched_by_location/total_records*100:.2f}%)")
+    print(f"Records matched by ISO code: {matched_by_iso} ({matched_by_iso/total_records*100:.2f}%)")
+    print(f"Records with new death data: {non_null_new_deaths} ({non_null_new_deaths/total_records*100:.2f}%)")
+    print(f"Records with total death data: {non_null_total_deaths} ({non_null_total_deaths/total_records*100:.2f}%)")
+    
+    return result_df
+
+def save_updated_data(df, original_path):
+    """
+    Save the updated data to a new file
+    """
+    # Generate timestamp for unique filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Create new filename
+    original_name = os.path.splitext(os.path.basename(original_path))[0]
+    new_filename = f"{original_name}_with_death_data_{timestamp}.csv"
+    
+    # Try to save in the same directory as the original file
+    save_dir = os.path.dirname(original_path)
+    save_path = os.path.join(save_dir, new_filename)
+    
+    try:
+        df.to_csv(save_path, index=False, encoding='utf-8')
+        print(f"Updated data successfully saved to: {save_path}")
+        return save_path
+    except Exception as e:
+        print(f"Error saving to original directory: {str(e)}")
+        
+        # Try alternative locations
+        alternative_locations = [
+            os.getcwd(),
+            os.path.expanduser('~'),
+            os.path.join(os.path.expanduser('~'), 'Documents'),
+            os.path.join(os.path.expanduser('~'), 'Downloads')
+        ]
+        
+        for location in alternative_locations:
+            try:
+                alt_path = os.path.join(location, new_filename)
+                df.to_csv(alt_path, index=False, encoding='utf-8')
+                print(f"Updated data saved to alternative location: {alt_path}")
+                return alt_path
+            except Exception as e2:
+                print(f"Error saving to {location}: {str(e2)}")
+                continue
+        
+        return None
+
+def save_summary_to_txt(summary, original_path):
+    """
+    Save the summary to a text file
+    """
+    # Generate timestamp for unique filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Create new filename
+    original_name = os.path.splitext(os.path.basename(original_path))[0]
+    new_filename = f"{original_name}_summary_{timestamp}.txt"
+    
+    # Try to save in the same directory as the original file
+    save_dir = os.path.dirname(original_path)
+    save_path = os.path.join(save_dir, new_filename)
+    
+    try:
+        with open(save_path, 'w', encoding='utf-8') as f:
+            f.write("="*60 + "\n")
+            f.write("COVID-19 DEATH DATA INTEGRATION SUMMARY\n")
+            f.write("="*60 + "\n")
+            f.write(f"Execution Time: {summary['execution_time']}\n\n")
+            
+            f.write("Data Sources:\n")
+            f.write(f"- Existing Data: {summary['data_sources']['existing_data']}\n")
+            f.write(f"- Death Data: {summary['data_sources']['death_data']}\n\n")
+            
+            f.write("Data Integration:\n")
+            f.write(f"- Original Records: {summary['data_integration']['original_records']:,}\n")
+            f.write(f"- Final Records: {summary['data_integration']['final_records']:,}\n")
+            f.write(f"- Original Columns: {summary['data_integration']['original_columns']}\n")
+            f.write(f"- Final Columns: {summary['data_integration']['final_columns']}\n")
+            f.write(f"- New Columns Added: {', '.join(summary['data_integration']['new_columns_added'])}\n")
+            f.write(f"- Merge Strategy: {summary['data_integration']['merge_strategy']}\n\n")
+            
+            f.write("Matching Statistics:\n")
+            f.write(f"- Records Matched by Location: {summary['matching_stats']['matched_by_location']:,} ({summary['matching_stats']['matched_by_location_pct']:.2f}%)\n")
+            f.write(f"- Records Matched by ISO Code: {summary['matching_stats']['matched_by_iso']:,} ({summary['matching_stats']['matched_by_iso_pct']:.2f}%)\n")
+            f.write(f"- Total Records with Death Data: {summary['matching_stats']['total_with_death_data']:,} ({summary['matching_stats']['total_with_death_data_pct']:.2f}%)\n\n")
+            
+            f.write("Data Quality:\n")
+            f.write(f"- Non-null New Deaths Records: {summary['data_quality']['non_null_new_deaths']:,}\n")
+            f.write(f"- Non-null Total Deaths Records: {summary['data_quality']['non_null_total_deaths']:,}\n")
+            f.write(f"- Date Range: {summary['data_quality']['date_range']}\n")
+            f.write(f"- New Deaths Completeness: {summary['data_quality']['completeness_new_deaths']}\n")
+            f.write(f"- Total Deaths Completeness: {summary['data_quality']['completeness_total_deaths']}\n\n")
+            
+            f.write("Output:\n")
+            f.write(f"- Saved File: {summary['output']['saved_file']}\n")
+            f.write(f"- File Size: {summary['output']['file_size']}\n\n")
+            
+            f.write("Process Steps:\n")
+            for step in summary["steps"]:
+                status = step["status"]
+                if status == "Completed":
+                    f.write(f"✓ Step {step['step']}: {step['action']}\n")
+                else:
+                    f.write(f"✗ Step {step['step']}: {step['action']} - {step.get('error', 'Failed')}\n")
+            
+            f.write("="*60 + "\n")
+        
+        print(f"Summary successfully saved to: {save_path}")
+        return save_path
+    except Exception as e:
+        print(f"Error saving summary: {str(e)}")
+        return None
+
+def generate_summary(process_steps, merged_df, original_df, saved_path, matching_stats):
+    """
+    Generate and print a summary of the data collection process
+    """
+    summary = {
+        "title": "COVID-19 Death Data Integration Summary",
+        "execution_time": f"{process_steps['start_time']} to {process_steps['end_time']}",
+        "data_sources": {
+            "existing_data": process_steps["existing_data"],
+            "death_data": process_steps["death_data"]
+        },
+        "data_integration": {
+            "original_records": len(original_df),
+            "final_records": len(merged_df),
+            "original_columns": len(original_df.columns),
+            "final_columns": len(merged_df.columns),
+            "new_columns_added": ["new_deaths", "total_deaths"],
+            "merge_strategy": process_steps["merge_strategy"]
+        },
+        "matching_stats": matching_stats,
+        "data_quality": {
+            "non_null_new_deaths": merged_df['new_deaths'].notna().sum(),
+            "non_null_total_deaths": merged_df['total_deaths'].notna().sum(),
+            "date_range": f"{merged_df['date'].min()} to {merged_df['date'].max()}",
+            "completeness_new_deaths": f"{(merged_df['new_deaths'].notna().sum() / len(merged_df) * 100):.2f}%",
+            "completeness_total_deaths": f"{(merged_df['total_deaths'].notna().sum() / len(merged_df) * 100):.2f}%"
+        },
+        "output": {
+            "saved_file": saved_path,
+            "file_size": f"{os.path.getsize(saved_path) / (1024*1024):.2f} MB"
+        },
+        "steps": process_steps["steps"]
+    }
+    
+    print("\n" + "="*60)
+    print("COVID-19 DEATH DATA INTEGRATION SUMMARY")
+    print("="*60)
+    print(f"Execution Time: {summary['execution_time']}")
+    print("\nData Sources:")
+    print(f"- Existing Data: {summary['data_sources']['existing_data']}")
+    print(f"- Death Data: {summary['data_sources']['death_data']}")
+    
+    print("\nData Integration:")
+    print(f"- Original Records: {summary['data_integration']['original_records']:,}")
+    print(f"- Final Records: {summary['data_integration']['final_records']:,}")
+    print(f"- Original Columns: {summary['data_integration']['original_columns']}")
+    print(f"- Final Columns: {summary['data_integration']['final_columns']}")
+    print(f"- New Columns Added: {', '.join(summary['data_integration']['new_columns_added'])}")
+    print(f"- Merge Strategy: {summary['data_integration']['merge_strategy']}")
+    
+    print("\nMatching Statistics:")
+    print(f"- Records Matched by Location: {summary['matching_stats']['matched_by_location']:,} ({summary['matching_stats']['matched_by_location_pct']:.2f}%)")
+    print(f"- Records Matched by ISO Code: {summary['matching_stats']['matched_by_iso']:,} ({summary['matching_stats']['matched_by_iso_pct']:.2f}%)")
+    print(f"- Total Records with Death Data: {summary['matching_stats']['total_with_death_data']:,} ({summary['matching_stats']['total_with_death_data_pct']:.2f}%)")
+    
+    print("\nData Quality:")
+    print(f"- Non-null New Deaths Records: {summary['data_quality']['non_null_new_deaths']:,}")
+    print(f"- Non-null Total Deaths Records: {summary['data_quality']['non_null_total_deaths']:,}")
+    print(f"- Date Range: {summary['data_quality']['date_range']}")
+    print(f"- New Deaths Completeness: {summary['data_quality']['completeness_new_deaths']}")
+    print(f"- Total Deaths Completeness: {summary['data_quality']['completeness_total_deaths']}")
+    
+    print("\nOutput:")
+    print(f"- Saved File: {summary['output']['saved_file']}")
+    print(f"- File Size: {summary['output']['file_size']}")
+    
+    print("\nProcess Steps:")
+    for step in summary["steps"]:
+        status = step["status"]
+        if status == "Completed":
+            print(f"✓ Step {step['step']}: {step['action']}")
+        else:
+            print(f"✗ Step {step['step']}: {step['action']} - {step.get('error', 'Failed')}")
+    
+    print("="*60)
+    
+    return summary
+
+def main():
+    """
+    Main function to execute the data merging process
+    """
+    print("=== Adding Death Data to Existing COVID Dataset ===")
+    
+    # Initialize process steps
+    process_steps = {
+        "title": "Adding Death Data to Existing COVID Dataset",
+        "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "steps": []
+    }
+    
+    # Path to the existing file
+    existing_file_path = r"C:\Users\ASUS\Desktop\Barnabus\Data\covid19_with_worldbank_indicators.csv"
+    process_steps["existing_data"] = existing_file_path
+    
+    # Path to the death data file
+    death_data_path = r"C:\Users\ASUS\Desktop\Barnabus\Data\Covid19Data.xlsx"
+    process_steps["death_data"] = death_data_path
+  
+    
+  
+    
+  
+    
+  
+    
+# Step 1: Load the existing data
+
+
+
+    process_steps["steps"].append({
+        "step": 1,
+        "action": "Load existing data",
+        "file_path": existing_file_path,
+        "status": "In progress"
+    })
+    
+    existing_df = load_existing_data(existing_file_path)
+    if existing_df is None:
+        process_steps["steps"][-1]["status"] = "Failed"
+        process_steps["steps"][-1]["error"] = "Failed to load existing data"
+        print("Failed to load existing data")
+        return
+    else:
+        process_steps["steps"][-1]["status"] = "Completed"
+        process_steps["steps"][-1]["data_shape"] = str(existing_df.shape)
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+# Step 2: Load local COVID death data
+    
+    
+    process_steps["steps"].append({
+        "step": 2,
+        "action": "Load local COVID death data",
+        "file_path": death_data_path,
+        "status": "In progress"
+    })
+    
+    death_df = load_local_covid_data()
+    if death_df is None:
+        process_steps["steps"][-1]["status"] = "Failed"
+        process_steps["steps"][-1]["error"] = "Failed to load death data"
+        print("Failed to load death data")
+        return
+    else:
+        process_steps["steps"][-1]["status"] = "Completed"
+        process_steps["steps"][-1]["data_shape"] = str(death_df.shape)
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+# Step 3: Merge the data
+
+    process_steps["steps"].append({
+        "step": 3,
+        "action": "Merge data with multiple matching strategies",
+        "status": "In progress"
+    })
+    
+    merged_df = merge_data(existing_df, death_df)
+    if merged_df is None:
+        process_steps["steps"][-1]["status"] = "Failed"
+        process_steps["steps"][-1]["error"] = "Failed to merge data"
+        print("Failed to merge data")
+        return
+    else:
+        process_steps["steps"][-1]["status"] = "Completed"
+        process_steps["steps"][-1]["data_shape"] = str(merged_df.shape)
+        process_steps["merge_strategy"] = "Multi-strategy matching: location and ISO code"
+    
+    # Calculate matching statistics
+    total_records = len(merged_df)
+    matched_by_location = 0
+    matched_by_iso = 0
+    
+    # We need to recalculate these statistics since they weren't returned from merge_data
+    # This is a simplified version - in a real implementation, you'd return these from merge_data
+    non_null_new_deaths = merged_df['new_deaths'].notna().sum()
+    non_null_total_deaths = merged_df['total_deaths'].notna().sum()
+    
+    matching_stats = {
+        "matched_by_location": matched_by_location,
+        "matched_by_location_pct": (matched_by_location / total_records * 100) if total_records > 0 else 0,
+        "matched_by_iso": matched_by_iso,
+        "matched_by_iso_pct": (matched_by_iso / total_records * 100) if total_records > 0 else 0,
+        "total_with_death_data": non_null_new_deaths,
+        "total_with_death_data_pct": (non_null_new_deaths / total_records * 100) if total_records > 0 else 0
+    }
+    
+     
+    
+# Step 4: Display information about the merged data
+
+
+
+
+    process_steps["steps"].append({
+        "step": 4,
+        "action": "Display merged data information",
+        "status": "In progress"
+    })
+    
+    print("\n=== Merged Data Information ===")
+    print(f"Total records: {len(merged_df)}")
+    print(f"Total columns: {len(merged_df.columns)}")
+    
+    # Display date range
+    if 'date' in merged_df.columns:
+        date_range = f"{merged_df['date'].min()} to {merged_df['date'].max()}"
+        print(f"Date range: {date_range}")
+        process_steps["steps"][-1]["date_range"] = date_range
+    
+    # Display sample data
+    print("\nSample merged data (first 5 rows):")
+    key_columns = ['country_name', 'iso_3166_1_alpha_3', 'date', 'new_deaths', 'total_deaths']
+    available_key_columns = [col for col in key_columns if col in merged_df.columns]
+    print(merged_df[available_key_columns].head().to_string())
+    
+    # Display new columns added
+    original_columns = set(existing_df.columns)
+    new_columns = [col for col in merged_df.columns if col not in original_columns]
+    print(f"\nNumber of new columns added: {len(new_columns)}")
+    print("New columns:")
+    for col in new_columns:
+        print(f"- {col}")
+    
+    process_steps["steps"][-1]["status"] = "Completed"
+    process_steps["steps"][-1]["total_records"] = len(merged_df)
+    process_steps["steps"][-1]["total_columns"] = len(merged_df.columns)
+    process_steps["steps"][-1]["new_columns"] = new_columns
+    
+
+
+
+
+
+
+
+
+# Step 5: Save the updated data
+
+
+
+
+    process_steps["steps"].append({
+        "step": 5,
+        "action": "Save updated data",
+        "status": "In progress"
+    })
+    
+    print("\nSaving updated data...")
+    saved_path = save_updated_data(merged_df, existing_file_path)
+    
+    if saved_path:
+        process_steps["steps"][-1]["status"] = "Completed"
+        process_steps["steps"][-1]["saved_path"] = saved_path
+        print(f"\nUpdated data successfully saved to: {saved_path}")
+    else:
+        process_steps["steps"][-1]["status"] = "Failed"
+        process_steps["steps"][-1]["error"] = "Failed to save updated data"
+        print("\nFailed to save updated data")
+    
+    # Record end time
+    process_steps["end_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Generate and print summary
+    summary = generate_summary(process_steps, merged_df, existing_df, saved_path, matching_stats)
+    
+    # Save summary to text file
+    summary_path = save_summary_to_txt(summary, existing_file_path)
+    
+    return summary
+
+if __name__ == "__main__":
+    main()
