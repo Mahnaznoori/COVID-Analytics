@@ -1,79 +1,75 @@
 # COVID-Analytics
 
+
 ## Description
 A comprehensive multi-layered analysis system for COVID-19 data that integrates data collection, validation, statistical reasoning, and governance reporting. This project provides actionable insights into pandemic impacts across different regions through interactive visualizations and policy simulation tools.
 
 ## Project Structure
-├── Layer1_Data_Collection.py
-├── Layer2_Validation.py
-├── Layer3_Statistical_Reasoning.py
-├── Layer4_Governance.py
-├── Dashboard.py
-├── README.md
-├── requirements.txt
-├── data/
+├── Barnabus/
 │ ├── cleaned_covid_data.csv
-│ ├── weekly_aggregates.csv
-│ └── annual_aggregates.csv
-├── output/
+│ ├── Combinedatagoogle&worldbank.csv
+│ ├── Layer1_Data_Collection.py
+│ ├── Layer2_Validation.py
+│ ├── Layer3_Statistical_Reasoning.py
+│ ├── Layer4_Governance.py
+│ ├── Dashboard.py
 │ ├── html_output/
 │ │ └── dashboard.html
-│ └── governance/
-│ ├── logs/
-│ └── reports/
-└── all result/
-├── charts/
-└── tables/
+│ ├── output/
+│ │ ├── charts/
+│ │ ├── tables/
+│ │ ├── governance/
+│ │ │ ├── logs/
+│ │ │ └── reports/
+│ │ └── all result/
+│ └── requirements.txt
+├── README.md
 
 
-# Quick Start
-1. Clone the repository:
-   
-   git clone https://github.com/Mahnaznoori/COVID-Analytics.git
-   cd COVID-Analytics
+## Quick Start
+1. **Project Setup**:
+   - Place all project files in the `Barnabus` folder on your desktop
+   - Ensure `cleaned_covid_data.csv` is in the root of the Barnabus folder
 
-2.Install dependencies:
-pip install -r requirements.txt
+2. **Install Dependencies**:
+ pip install -r requirements.txt
 
-3.Run the analysis pipeline:
-python Layer1_Data_Collection.py
-python Layer2_Validation.py
-python Layer3_Statistical_Reasoning.py
-python Layer4_Governance.py
-python Dashboard.py
-
-
+3.**Run Analysis Pipeline:
+Full Pipeline (Run sequentially):
+python Barnabus/Layer1_Data_Collection.py
+python Barnabus/Layer2_Validation.py
+python Barnabus/Layer3_Statistical_Reasoning.py
+python Barnabus/Layer4_Governance.py
+python Barnabus/Dashboard.py
 
 
+Accelerated Execution (if cleaned_covid_data.csv exists):
+python Barnabus/Layer2_Validation.py
+python Barnubar/Layer3_Statistical_Reasoning.py
+python Barnabus/Layer4_Governance.py
+python Barnabus/Dashboard.py
 
-4.View the dashboard:
-Open output/"......." in your browser
-
-
-
-
-
-
+4.**View Results:
+Open Barnabus/html_output/dashboard.html in your browser
+Additional outputs available in Barnabus/output/ folder
 
 Analysis Layers
-# Layer 1: Data Collection & Preprocessing
-
+Layer 1: Data Collection & Preprocessing
 Sources: World Bank, Google COVID-19 Open Data, OWID
-
 Features:
 Automated data integration from multiple sources
 Missing value handling and data cleaning
 Weekly/annual aggregation
 Feature engineering for health indicators
 Output: Preprocessed datasets with unified structure
-# Layer 2: Validation & Anomaly Detection
+Layer 2: Validation & Anomaly Detection
 Methods:
 Missing value analysis
 IQR and Z-score outlier detection
 Temporal irregularity detection
 Explainable logging
 Output: Validation reports with actionable insights
-# Layer 3: Statistical Reasoning
+Layer 3: Statistical Reasoning
 Analyses:
 Time series smoothing (MA, EWMA, ARIMA)
 Correlation analysis
@@ -81,14 +77,14 @@ Regression modeling with multicollinearity handling
 Regional equity comparisons
 Vaccine impact assessment
 Output: Statistical models and insights
-# Layer 4: Governance & Reporting
+Layer 4: Governance & Reporting
 Features:
 Structured JSON/CSV logging
 Automated summary reports
 Version control integration
 Audit trails
 Output: Governance reports and audit logs
-# Dashboard Features
+Dashboard Features
 Multi-layer Navigation: Tabbed interface for each analysis layer
 Interactive Visualizations:
 Regional comparison charts
@@ -101,6 +97,8 @@ Responsive Design: Works on desktop and mobile devices
 
 
 
+
+Dependencies
 pandas==1.5.3
 numpy==1.24.3
 matplotlib==3.7.1
@@ -115,6 +113,8 @@ beautifulsoup4==4.12.2
 pillow==10.0.0
 gitpython==3.1.31
 
+
+
 # Data Sources
 Data_Collection
 🌍 COVID-19 Analytics: Multi-source (World Bank + Google + github) time series, regression &amp; interactive dashboard
@@ -127,13 +127,17 @@ URL: https://raw.githubusercontent.com/owid/covid-19-data/refs/heads/master/publ
 
 
 
-Sample Insights
+# Sample Insights
 Regional Disparities: Identified significant differences in death rates between WHO regions
 Vaccine Impact: Quantified 10% vaccination rate improvement leads to 7% reduction in death rates
 Anomaly Detection: Flagged 237 data anomalies requiring investigation
 Health System Correlation: Strong correlation (r=0.78) between hospital bed availability and mortality rates
+
+
+
 # License
 This project is licensed under the MIT License - see the LICENSE file for details.
+
 
 # Contributing
 Fork the repository
@@ -141,8 +145,9 @@ Create a feature branch (git checkout -b feature/AmazingFeature)
 Commit your changes (git commit -m 'Add some AmazingFeature')
 Push to the branch (git push origin feature/AmazingFeature)
 Open a Pull Request
-Contact
-# Mahnaz Nouri
+
+# Contact
+Mahnaz Nouri
 
 GitHub: Mahnaznoori
 Email: mahnaznoori@gmail.com ;
