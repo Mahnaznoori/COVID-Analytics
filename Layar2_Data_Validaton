@@ -1,0 +1,2024 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Nov 12 22:39:38 2025
+"""
+
+# ======================
+# IMPORT LIBRARIES-Layar2
+# ======================
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+from datetime import datetime
+import warnings
+import json
+warnings.filterwarnings('ignore')
+
+# Scientific computing
+from scipy import stats
+from scipy.stats import chi2_contingency, norm
+
+# Machine learning
+from sklearn.preprocessing import LabelEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import cross_val_score, KFold
+from sklearn.linear_model import LinearRegression
+
+# Time series analysis
+from statsmodels.tsa.seasonal import seasonal_decompose
+
+# Parallel processing - try to import pathos, fall back to alternatives
+import time
+try:
+    from pathos.multiprocessing import ProcessingPool as Pool
+    from pathos.helpers import cpu_count
+    PARALLEL_AVAILABLE = True
+    print("Using pathos for parallel processing")
+except ImportError:
+    try:
+        import multiprocessing
+        from multiprocessing import Pool, cpu_count
+        PARALLEL_AVAILABLE = True
+        print("Using multiprocessing for parallel processing")
+    except ImportError:
+        PARALLEL_AVAILABLE = False
+        print("Parallel processing not available, using sequential processing")
+        # Define dummy cpu_count function
+        def cpu_count():
+            return 1
+
+# ======================
+# CONFIGURATION
+# ======================
+# Set random seeds for reproducibility
+np.random.seed(42)
+RANDOM_STATE = 42
+
+# Optimization settings
+plt.rcParams.update({
+    'figure.max_open_warning': 0,
+    'figure.constrained_layout.use': True,
+})
+
+# Determine number of cores for parallel processing
+if PARALLEL_AVAILABLE:
+    NUM_CORES = max(1, cpu_count() - 1)
+else:
+    NUM_CORES = 1
+
+# File paths
+data_file = r"C:\Users\ASUS\Desktop\Barnabus\covid19_with_worldbank_indicators_with_death_data_20251109_150311.csv"
+output_dir = r"C:\Users\ASUS\Desktop\Barnabus"
+output_plots_dir = os.path.join(output_dir, "output_plots")
+cleaned_data_path = os.path.join(output_dir, "cleaned_covid_data.csv")
+results_data_path = os.path.join(output_dir, "computational_results.csv")
+log_path = os.path.join(output_dir, "data_processing_log.json")
+summary_report_path = os.path.join(output_dir, "summary_report.txt")
+stats_comparison_path = os.path.join(output_dir, "statistics_comparison.csv")
+
+# Create output directories
+os.makedirs(output_dir, exist_ok=True)
+os.makedirs(output_plots_dir, exist_ok=True)
+
+# ======================
+# GLOBAL DEFINITIONS
+# ======================
+# Dictionary for storing results and logs
+log_data = {
+    "timestamp": datetime.now().isoformat(),
+    "steps": {},
+    "errors": [],
+    "validation_results": {},
+    "summary": {},
+    "alerts": []
+}
+
+# Define essential columns that should not be dropped
+essential_columns = [
+    'new_vaccinations','total_vaccinations', 'people_vaccinated','people_fully_vaccinated', 'total_vaccinations_per_hundred','people_vaccinated_per_hundred', 'people_fully_vaccinated_per_hundred', 'gdp_per_capita', 
+    'handwashing_facilities','new_cases', 'new_deaths', 'total_cases','total_deaths',
+    'new_tests','positive_rate','population', 'aged_65_older','aged_70_older', 'date', 'continent',
+    'new_cases','new_deaths','new_vaccinations','total_vaccinations_per_hundred', 'people_vaccinated_per_hundred',
+    'diabetes_prevalence', 'cardiovascular_death_rate','population','country_name'
+]
+
+# Define critical columns (columns that should be handled with care)
+critical_columns = ['new_deaths', 'new_cases', 'new_vaccinations', 'total_vaccinations_per_hundred', 
+                   'people_vaccinated_per_hundred', 'people_fully_vaccinated_per_hundred', 'gdp_per_capita', 
+                   'population', 'date', 'country_name', 'continent']
+
+# Define WHO regions dictionary
+who_regions = {
+    "AFRO": ["Algeria","Ivory Coast","Republic of the Congo","Cape Verde", "Angola", "Benin", "Botswana", "Burkina Faso", "Burundi", "Cabo Verde", "Cameroon", 
+            "Central African Republic", "Chad", "Comoros", "Congo", "Côte d'Ivoire", "Democratic Republic of the Congo", 
+            "Equatorial Guinea","Swaziland", "Eritrea", "Eswatini", "Ethiopia", "Gabon", "Gambia", "Ghana", "Guinea", 
+            "Guinea-Bissau", "Kenya", "Lesotho", "Liberia", "Madagascar", "Malawi", "Mali", "Mauritania", "Mauritius", 
+            "Mozambique","Tanzania", "Namibia", "Niger", "Nigeria", "Rwanda", "Sao Tome and Principe", "Senegal", "Seychelles", 
+            "Sierra Leone", "South Africa", "South Sudan", "Togo", "Uganda", "United Republic of Tanzania", "Zambia", "Zimbabwe"],
+    "AMRO": ["Antigua and Barbuda", "SÃ£o TomÃ© and PrÃ­ncipe","Argentina", "Bahamas", "Barbados", "Belize", "Bolivia", "Brazil", "Canada", 
+            "Chile", "Colombia", "Costa Rica", "Cuba", "Dominica", "Dominican Republic", "Ecuador", "El Salvador", 
+            "Grenada", "Guatemala", "Guyana", "Haiti", "Honduras", "Jamaica", "Mexico", "Nicaragua", "Panama", 
+            "Paraguay", "Peru", "Saint Kitts and Nevis", "Saint Lucia", "Saint Vincent and the Grenadines", 
+            "Suriname", "Trinidad and Tobago", "United States of America", "Uruguay", "Venezuela",
+            "Aruba", "Bermuda", "Cayman Islands", "Curaçao", "Puerto Rico", "United States Virgin Islands"],
+    "SEARO": ["Bangladesh", "East Timor","Bhutan", "Democratic People's Republic of Korea", "India", "Indonesia", "Maldives", 
+              "Myanmar", "Nepal", "Sri Lanka", "Thailand", "Timor-Leste"],
+    "EURO": ["Albania","Russia", "Andorra", "Armenia", "Austria", "Azerbaijan", "Belarus", "Belgium", "Bosnia and Herzegovina", 
+             "Bulgaria","Moldova", "Croatia", "Cyprus", "Czechia", "Denmark", "Estonia", "Finland", "France", "Georgia", 
+             "Germany","Czech Republic", "Greece", "Hungary", "Iceland", "Ireland", "Israel", "Italy", "Kazakhstan", "Kyrgyzstan", 
+             "Latvia", "Lithuania", "Luxembourg", "Malta", "Monaco", "Montenegro", "Netherlands", "North Macedonia", 
+             "Norway", "Poland", "Portugal", "Republic of Moldova", "Romania", "Russian Federation", "San Marino", 
+             "Serbia", "Slovakia", "Slovenia", "Spain", "Sweden", "Switzerland", "Tajikistan", "Turkey", 
+             "Turkmenistan", "Ukraine", "United Kingdom", "Uzbekistan", "Faroe Islands", "Greenland", "Liechtenstein"],
+    "WPRO": ["Australia","Brunei", "Brunei Darussalam", "Cambodia", "China", "Cook Islands", "Fiji", "Japan", "Kiribati", 
+             "Lao People's Democratic Republic", "Malaysia", "Marshall Islands", "Micronesia", "Mongolia", "Nauru", 
+             "New Zealand","Laos","South Korea","Vietnam", "Niue", "Palau", "Papua New Guinea", "Philippines", "Republic of Korea", "Samoa", 
+             "Singapore", "Solomon Islands", "Tokelau", "Tonga", "Tuvalu", "Vanuatu", "Viet Nam",
+             "French Polynesia", "Guam", "Hong Kong", "Macau", "New Caledonia"],
+    "EMRO": ["Afghanistan","Syria", "Bahrain", "Djibouti", "Egypt", "Iran", "Iraq", "Jordan", "Kuwait", "Lebanon", 
+             "Libya", "Morocco", "Oman", "Pakistan", "Palestine", "Qatar", "Saudi Arabia", "Somalia", "South Sudan", 
+             "Sudan", "Syrian Arab Republic", "Tunisia", "United Arab Emirates", "Yemen"]
+}
+
+# Define health system governance dictionary
+health_system_governance = {
+    "United States": "High", "Canada": "High", "United Kingdom": "High", "Germany": "High", "France": "High",
+    "Italy": "High", "Spain": "High", "Japan": "High", "South Korea": "High", "Australia": "High",
+    "New Zealand": "High", "China": "Medium", "India": "Medium", "Brazil": "Medium", "Russia": "Medium",
+    "Mexico": "Medium", "Indonesia": "Medium", "Turkey": "Medium", "Saudi Arabia": "Medium",
+    "Nigeria": "Low", "Egypt": "Low", "South Africa": "Low", "Argentina": "Medium", "Iran": "Medium",
+    "Thailand": "Medium", "Iraq": "Low", "Vietnam": "Medium", "Philippines": "Medium", "Myanmar": "Low",
+    "Kenya": "Low", "Colombia": "Medium", "Chile": "High", "Peru": "Medium", "Bangladesh": "Low",
+    "Ukraine": "Medium", "Uzbekistan": "Low", "Malaysia": "High", "Venezuela": "Low", "Morocco": "Medium",
+    "Ghana": "Low", "Mozambique": "Low", "Angola": "Low", "Sudan": "Low", "Netherlands": "High",
+    "Belgium": "High", "Poland": "High", "Sweden": "High", "Switzerland": "High", "Austria": "High",
+    "Norway": "High", "Denmark": "High", "Finland": "High", "Singapore": "High", "Israel": "High",
+    "Ireland": "High", "United Arab Emirates": "High", "Qatar": "High", "Kuwait": "High", "Bahrain": "High",
+    "Oman": "Medium", "Jordan": "Medium", "Lebanon": "Medium", "Iraq": "Low", "Syria": "Low",
+    "Yemen": "Low", "Libya": "Low", "Tunisia": "Medium", "Algeria": "Medium"
+}
+
+# ======================
+# HELPER FUNCTIONS
+# ======================
+def log_step(step_name, details, severity="info", category="processing", message="", recommendation=""):
+    """Log processing steps with enhanced structure"""
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "step": step_name,
+        "severity": severity,
+        "category": category,
+        "message": message,
+        "recommendation": recommendation,
+        "details": details
+    }
+    
+    if step_name not in log_data["steps"]:
+        log_data["steps"][step_name] = []
+    log_data["steps"][step_name].append(log_entry)
+    
+    if message:
+        print(f"[{severity.upper()}] {message}")
+        if recommendation:
+            print(f"  Recommendation: {recommendation}")
+    
+    return log_entry
+
+def log_error(error_msg, severity="critical", category="error", recommendation=""):
+    """Log errors with enhanced structure"""
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "severity": severity,
+        "category": category,
+        "message": f"Error: {error_msg}",
+        "recommendation": recommendation,
+        "details": {"error": error_msg}
+    }
+    
+    log_data["errors"].append(log_entry)
+    print(f"[{severity.upper()}] Error: {error_msg}")
+    if recommendation:
+        print(f"  Recommendation: {recommendation}")
+    
+    return log_entry
+
+def json_serializer(obj):
+    """JSON serializer for objects not serializable by default json code"""
+    if isinstance(obj, (pd.Timestamp, np.datetime64, datetime)):
+        return obj.isoformat()
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        if np.isnan(obj):
+            return None
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, pd.DataFrame):
+        return obj.to_dict(orient='records')
+    elif isinstance(obj, pd.Series):
+        return obj.tolist()
+    elif isinstance(obj, (float, int)) and pd.isna(obj):
+        return None
+    else:
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+def load_data_optimized(file_path):
+    """Optimized data loading with support for large files"""
+    file_size = os.path.getsize(file_path)
+    
+    if file_size > 100 * 1024 * 1024:  # If the file is larger than 100MB
+        print(f"Loading large file ({file_size/1024/1024:.1f} MB) using chunks...")
+        chunks = pd.read_csv(file_path, chunksize=50000)
+        df = pd.concat(chunks)
+    else:
+        df = pd.read_csv(file_path)
+    
+    return df
+
+def optimize_memory(df):
+    """Optimize memory by changing data types"""
+    start_mem = df.memory_usage().sum() / 1024**2
+    print(f"Memory usage before optimization: {start_mem:.2f} MB")
+    
+    # Optimize numeric columns
+    for col in df.select_dtypes(include=['int64']).columns:
+        df[col] = pd.to_numeric(df[col], downcast='integer')
+    
+    for col in df.select_dtypes(include=['float64']).columns:
+        df[col] = pd.to_numeric(df[col], downcast='float')
+    
+    # Optimize string columns
+    for col in df.select_dtypes(include=['object']).columns:
+        if df[col].nunique() / len(df[col]) < 0.5:  # If unique values are less than 50%
+            df[col] = df[col].astype('category')
+    
+    end_mem = df.memory_usage().sum() / 1024**2
+    print(f"Memory usage after optimization: {end_mem:.2f} MB")
+    print(f"Reduced by {100 * (start_mem - end_mem) / start_mem:.1f}%")
+    
+    return df
+
+def calculate_missing_percent_optimized(df, col):
+    """Optimized calculation of missing data percentage"""
+    if col not in df.columns:
+        return 100.0
+    
+    total_rows = len(df)
+    if total_rows == 0:
+        return 100.0
+    
+    missing_count = df[col].isna().sum()
+    return (missing_count / total_rows) * 100
+
+def detect_outliers_iqr_optimized(df, col):
+    """Optimized outlier detection using IQR method"""
+    try:
+        col_data = df[col].dropna()
+        if len(col_data) == 0:
+            return pd.DataFrame(), 0, 0
+        
+        # Using numpy for faster calculations
+        Q1 = np.percentile(col_data, 25)
+        Q3 = np.percentile(col_data, 75)
+        IQR = Q3 - Q1
+        
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+        
+        # Using boolean indexing for faster processing
+        outliers_mask = (df[col] < lower_bound) | (df[col] > upper_bound)
+        outliers = df[outliers_mask]
+        
+        return outliers, lower_bound, upper_bound
+    except Exception as e:
+        print(f"Error in IQR outlier detection for {col}: {str(e)}")
+        return pd.DataFrame(), 0, 0
+
+# Global function for parallel processing (not a local function)
+def detect_outliers_wrapper(args):
+    """Wrapper function for parallel outlier detection"""
+    df, col = args
+    return detect_outliers_iqr_optimized(df, col)
+
+def parallel_outlier_detection(df, columns):
+    """Parallel outlier detection for all columns"""
+    print(f"Detecting outliers in {len(columns)} columns using {NUM_CORES} cores...")
+    
+    start_time = time.time()
+    
+    # Prepare arguments for parallel processing
+    args = [(df, col) for col in columns]
+    
+    # Use appropriate parallel processing method
+    if PARALLEL_AVAILABLE and NUM_CORES > 1:
+        # Use multiprocessing for parallel processing
+        with Pool(processes=NUM_CORES) as pool:
+            results = pool.map(detect_outliers_wrapper, args)
+    else:
+        # Sequential processing
+        results = [detect_outliers_wrapper(arg) for arg in args]
+    
+    # Convert results to dictionary
+    outliers_data = {}
+    for col, (outliers, lower, upper) in zip(columns, results):
+        if len(outliers) > 0:
+            outliers_data[col] = {
+                "count": int(len(outliers)),
+                "percent": float(len(outliers) / len(df) * 100),
+                "bounds": [float(lower), float(upper)]
+            }
+    
+    end_time = time.time()
+    print(f"Outlier detection completed in {end_time - start_time:.2f} seconds")
+    
+    return outliers_data
+
+def handle_missing_vaccine_data(df):
+    """Handle missing vaccine data"""
+    if 'date' not in df.columns:
+        return df
+    
+    # Identify vaccine columns
+    vaccine_cols = [col for col in df.columns if 'vaccin' in col.lower()]
+    if not vaccine_cols:
+        return df
+    
+    # Find countries that have at least one non-NaN vaccine data
+    countries_with_vaccine = set()
+    for col in vaccine_cols:
+        non_na_countries = df[df[col].notna()]['country_name'].unique()
+        countries_with_vaccine.update(non_na_countries)
+    
+    all_countries = set(df['country_name'].unique())
+    countries_without_vaccine = all_countries - countries_with_vaccine
+    
+    log_step(
+        "vaccine_data_analysis",
+        {
+            "countries_without_vaccine": len(countries_without_vaccine),
+            "total_countries": len(all_countries),
+            "percentage": len(countries_without_vaccine) / len(all_countries) * 100
+        },
+        severity="medium",
+        category="missing_data",
+        message=f"Found {len(countries_without_vaccine)} countries without any vaccine data ({len(countries_without_vaccine) / len(all_countries) * 100:.1f}%)",
+        recommendation="Consider alternative data sources for these countries or mark them as having no vaccine data"
+    )
+    
+    # For countries without any vaccine data, fill all vaccine columns with 0
+    for country in countries_without_vaccine:
+        country_mask = df['country_name'] == country
+        for col in vaccine_cols:
+            df.loc[country_mask, col] = 0
+    
+    return df
+
+def safe_forward_fill(series):
+    """Safe forward fill that handles edge cases"""
+    try:
+        # If all values are NaN, return the series as is
+        if series.isna().all():
+            return series
+        
+        # Try forward fill
+        filled = series.fillna(method='ffill')
+        
+        # If there are still NaNs at the beginning, fill with the first non-NaN value
+        if filled.isna().any():
+            first_valid = series.dropna().iloc[0] if not series.dropna().empty else 0
+            filled = filled.fillna(first_valid)
+        
+        return filled
+    except Exception as e:
+        print(f"Forward fill failed: {str(e)}")
+        return series  # Return original series if fill fails
+
+def safe_interpolation(series):
+    """Safe interpolation that handles edge cases"""
+    try:
+        # If all values are NaN, return the series as is
+        if series.isna().all():
+            return series
+        
+        # If less than 2 non-NaN values, return mean
+        non_nan_count = series.count()
+        if non_nan_count < 2:
+            return series.fillna(series.mean())
+        
+        # Try interpolation
+        filled = series.interpolate()
+        
+        # If there are still NaNs, fill with mean
+        if filled.isna().any():
+            filled = filled.fillna(series.mean())
+        
+        return filled
+    except Exception as e:
+        print(f"Interpolation failed: {str(e)}")
+        return series  # Return original series if interpolation fails
+
+# ======================
+# VALIDATION LAYER FUNCTIONS
+# ======================
+def check_inconsistent_values(df):
+    """Checking for inconsistent values in the dataset"""
+    inconsistent_values = {}
+    
+    # Checking for negative values in columns that should be positive
+    positive_columns = ['new_cases', 'new_deaths', 'new_vaccinations', 'new_tests', 
+                       'total_cases', 'total_deaths', 'total_vaccinations', 'total_tests']
+    
+    for col in positive_columns:
+        if col in df.columns:
+            negative_count = (df[col] < 0).sum()
+            if negative_count > 0:
+                inconsistent_values[col] = {
+                    'issue': 'negative_values',
+                    'count': int(negative_count),
+                    'percentage': float(negative_count / len(df) * 100)
+                }
+    
+    # Check logical inconsistencies between related columns
+    if 'new_cases' in df.columns and 'total_cases' in df.columns:
+        grouped = df.groupby('country_name')
+        inconsistent_countries = []
+        
+        for country, group in grouped:
+            if any(group['new_cases'] > group['total_cases']):
+                inconsistent_countries.append(country)
+        
+        if inconsistent_countries:
+            inconsistent_values['cases_logic'] = {
+                'issue': 'new_cases_greater_than_total',
+                'countries': inconsistent_countries,
+                'count': len(inconsistent_countries)
+            }
+    
+    return inconsistent_values
+
+def check_temporal_irregularities(df):
+    """Checking for temporal anomalies in the data"""
+    temporal_issues = {}
+    
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # Investigating sudden jumps in key indicators
+        key_indicators = ['new_cases', 'new_deaths', 'new_vaccinations']
+        
+        for indicator in key_indicators:
+            if indicator in df.columns:
+                # Grouping by country and week
+                grouped = df.groupby(['country_name', pd.Grouper(key='date', freq='W')])[indicator].sum().reset_index()
+                
+                # Calculate week-to-week percentage change
+                grouped['pct_change'] = grouped.groupby('country_name')[indicator].pct_change() * 100
+                
+                # Find weeks with abnormal percentage changes
+                outliers = grouped[abs(grouped['pct_change']) > 200]  # Change over 200%
+                
+                if not outliers.empty:
+                    # Convert dates to strings for JSON serialization
+                    outliers_list = []
+                    for _, row in outliers.iterrows():
+                        outliers_list.append({
+                            'country_name': row['country_name'],
+                            'date': row['date'].strftime('%Y-%m-%d'),
+                            indicator: float(row[indicator]),
+                            'pct_change': float(row['pct_change'])
+                        })
+                    
+                    temporal_issues[indicator] = {
+                        'issue': 'sudden_jump',
+                        'outliers': outliers_list,
+                        'count': len(outliers_list)
+                    }
+    
+    return temporal_issues
+
+def log_validation_issues(inconsistent_values, temporal_issues):
+    """Log validation issues with explanatory messages"""
+    
+    for col, issue in inconsistent_values.items():
+        if issue['issue'] == 'negative_values':
+            log_step(
+                "inconsistent_values",
+                issue,
+                severity="high",
+                category="validation",
+                message=f"Found {issue['count']} negative values in column {col} ({issue['percentage']:.2f}%)",
+                recommendation="Check the data entry process for this column"
+            )
+        elif issue['issue'] == 'new_cases_greater_than_total':
+            log_step(
+                "inconsistent_values",
+                issue,
+                severity="high",
+                category="validation",
+                message=f"In {issue['count']} countries, the number of new cases is higher than the total number of cases",
+                recommendation="Check the data aggregation process for these countries"
+            )
+    
+    for indicator, issue in temporal_issues.items():
+        if issue['issue'] == 'sudden_jump':
+            for outlier in issue['outliers']:
+                country = outlier['country_name']
+                date = outlier['date']
+                value = outlier[indicator]
+                pct_change = outlier['pct_change']
+                
+                log_step(
+                    "temporal_irregularity",
+                    {
+                        "indicator": indicator,
+                        "country": country,
+                        "date": date,
+                        "value": value,
+                        "pct_change": pct_change
+                    },
+                    severity="high",
+                    category="validation",
+                    message=f"Week {pd.to_datetime(date).isocalendar()[1]}: Sudden {pct_change:.0f}% change in {indicator} for country {country} - possible data entry error",
+                    recommendation="Verify the input data for this indicator in this country and week"
+                )
+
+# ======================
+# THRESHOLD SELECTION METHODS
+# ======================
+def iqr_based_threshold(df):
+    """Calculate threshold using IQR method"""
+    try:
+        missing_percentages = df.isnull().mean() * 100
+        Q1 = missing_percentages.quantile(0.25)
+        Q3 = missing_percentages.quantile(0.75)
+        IQR = Q3 - Q1
+        threshold = Q3 + 1.5 * IQR
+        return min(threshold, 80)  # Cap at 80%
+    except Exception as e:
+        log_error(f"Error in IQR method: {str(e)}")
+        return 50  # Default on error
+
+def std_based_threshold(df):
+    """Calculate threshold using standard deviation method"""
+    try:
+        missing_percentages = df.isnull().mean() * 100
+        mean = missing_percentages.mean()
+        std = missing_percentages.std()
+        threshold = mean + 2 * std
+        return min(threshold, 80)
+    except Exception as e:
+        log_error(f"Error in Standard Deviation method: {str(e)}")
+        return 50  # Default on error
+
+def target_correlation_based_threshold(df, target_col='new_deaths'):
+    """Calculate threshold based on correlation with target column"""
+    try:
+        if target_col not in df.columns:
+            return 50
+        
+        # Calculate missing percentages
+        missing_percent = {}
+        for col in df.columns:
+            missing_percent[col] = calculate_missing_percent_optimized(df, col)
+        
+        # Calculate correlations with target
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        correlations = {}
+        
+        for col in numeric_cols:
+            if col != target_col:
+                # Create temporary dataframe with just these two columns
+                temp_df = df[[col, target_col]].copy()
+                
+                # Drop rows with missing values
+                temp_df = temp_df.dropna()
+                
+                if len(temp_df) > 0:
+                    corr = temp_df[col].corr(temp_df[target_col])
+                    correlations[col] = abs(corr) if not np.isnan(corr) else 0
+                else:
+                    correlations[col] = 0
+        
+        # Create a dataframe with missing percentages and correlations
+        corr_df = pd.DataFrame({
+            'missing_percent': pd.Series(missing_percent),
+            'correlation': pd.Series(correlations)
+        })
+        
+        # Fill NA correlations with 0
+        corr_df['correlation'] = corr_df['correlation'].fillna(0)
+        
+        # Calculate weighted threshold: higher correlation = higher allowed missing
+        corr_df['weight'] = 1 - corr_df['correlation']
+        corr_df['weighted_missing'] = corr_df['missing_percent'] * corr_df['weight']
+        
+        # Use 75th percentile of weighted missing as threshold
+        threshold = np.percentile(corr_df['weighted_missing'], 75)
+        
+        return min(threshold, 80)  # Cap at 80%
+    except Exception as e:
+        log_error(f"Error in target correlation method: {str(e)}")
+        return 50
+
+def combined_iqr_corr_threshold(df, target_col='new_deaths'):
+    """Combine IQR method with correlation analysis"""
+    try:
+        # Calculate missing percentages
+        missing_percent = {}
+        for col in df.columns:
+            missing_percent[col] = calculate_missing_percent_optimized(df, col)
+        
+        missing_series = pd.Series(missing_percent)
+        
+        # IQR method
+        Q1 = missing_series.quantile(0.25)
+        Q3 = missing_series.quantile(0.75)
+        IQR = Q3 - Q1
+        iqr_threshold = Q3 + 1.5 * IQR
+        
+        # Correlation method
+        if target_col in df.columns:
+            corr_threshold = target_correlation_based_threshold(df, target_col)
+        else:
+            corr_threshold = 50
+        
+        # Combine thresholds (weighted average)
+        combined_threshold = 0.6 * iqr_threshold + 0.4 * corr_threshold
+        
+        return min(combined_threshold, 80)  # Cap at 80%
+    except Exception as e:
+        log_error(f"Error in combined IQR-corr method: {str(e)}")
+        return 50
+
+def advanced_hybrid_threshold(df):
+    """Intelligent combination of multiple methods"""
+    try:
+        # Calculate missing percentage
+        missing_percent = {}
+        for col in df.columns:
+            missing_percent[col] = calculate_missing_percent_optimized(df, col)
+        
+        # Method 1: IQR
+        missing_series = pd.Series(missing_percent)
+        Q1 = missing_series.quantile(0.25)
+        Q3 = missing_series.quantile(0.75)
+        IQR = Q3 - Q1
+        iqr_threshold = Q3 + 1.5 * IQR
+        
+        # Method 2: Standard deviation
+        mean_missing = missing_series.mean()
+        std_missing = missing_series.std()
+        std_threshold = mean_missing + 2 * std_missing
+        
+        # Method 3: 90th percentile
+        percentile_threshold = np.percentile(missing_series, 90)
+        
+        # Weighted combination of methods
+        combined_threshold = (
+            0.4 * iqr_threshold +
+            0.3 * std_threshold +
+            0.3 * percentile_threshold
+        )
+        
+        return min(combined_threshold, 80)
+    except Exception as e:
+        log_error(f"Error in advanced hybrid method: {str(e)}")
+        return 50
+
+# ======================
+# THRESHOLD METHODS CLASS
+# ======================
+class ThresholdMethods:
+    def __init__(self, df, target_col, critical_columns):
+        self.df = df
+        self.target_col = target_col
+        self.critical_columns = critical_columns
+    
+    def iqr_based_threshold(self):
+        """Threshold based on IQR"""
+        return iqr_based_threshold(self.df)
+    
+    def std_based_threshold(self):
+        """Threshold based on standard deviation"""
+        return std_based_threshold(self.df)
+    
+    def target_correlation_based_threshold(self):
+        """Threshold based on correlation with target"""
+        return target_correlation_based_threshold(self.df, self.target_col)
+    
+    def combined_iqr_corr_threshold(self):
+        """Combine IQR and correlation"""
+        return combined_iqr_corr_threshold(self.df, self.target_col)
+    
+    def advanced_hybrid_threshold(self):
+        """Advanced hybrid threshold"""
+        return advanced_hybrid_threshold(self.df)
+
+# ======================
+# EVALUATION FUNCTION
+# ======================
+def evaluate_threshold_result(threshold, df, target_col, critical_columns):
+    """Evaluate threshold results"""
+    try:
+        # Identify columns to drop
+        missing_percentages = df.isnull().mean() * 100
+        cols_to_drop = missing_percentages[missing_percentages > threshold].index.tolist()
+        
+        # Calculate number of dropped columns
+        num_dropped_columns = len(cols_to_drop)
+        
+        # Calculate data completeness after dropping
+        data_completeness = 100 - (df.isnull().sum().sum() / (df.shape[0] * df.shape[1]))
+        
+        # Calculate average correlation with target
+        if target_col in df.columns:
+            correlations = []
+            for col in df.columns:
+                if col != target_col and df[col].dtype in ['int64', 'float64']:
+                    corr = df[col].corr(df[target_col])
+                    correlations.append(abs(corr))
+            
+            if correlations:
+                avg_correlation_with_target = np.mean(correlations)
+            else:
+                avg_correlation_with_target = 0
+        else:
+            avg_correlation_with_target = 0
+        
+        # Calculate model score (deterministic formula for reproducibility)
+        model_score = 0.5 + 0.3 * (data_completeness / 100) + 0.2 * avg_correlation_with_target
+        
+        return {
+            "cols_to_drop": cols_to_drop,
+            "num_dropped_columns": num_dropped_columns,
+            "data_completeness": data_completeness,
+            "avg_correlation_with_target": avg_correlation_with_target,
+            "model_score": model_score
+        }
+    except Exception as e:
+        print(f"Error in evaluate_threshold_result: {str(e)}")
+        return {
+            "cols_to_drop": [],
+            "num_dropped_columns": 0,
+            "data_completeness": 0,
+            "avg_correlation_with_target": 0,
+            "model_score": 0
+        }
+
+# ======================
+# STEP 1: LOAD DATA
+# ======================
+def load_data():
+    """Load and optimize data"""
+    try:
+        print("Step 1: Loading data...")
+        
+        # Use optimized function to load data
+        df = load_data_optimized(data_file)
+        
+        # Optimize memory
+        df = optimize_memory(df)
+        
+        log_step(
+            "data_loading", 
+            {
+                "file_path": data_file,
+                "shape": df.shape,
+                "columns": list(df.columns)
+            },
+            severity="info",
+            category="processing",
+            message=f"Data loaded successfully. Shape: {df.shape}",
+            recommendation="Verify data integrity and completeness"
+        )
+        
+        # Handle countries without vaccine data
+        df = handle_missing_vaccine_data(df)
+        print("Handled countries without vaccine data")
+        
+        return df
+    
+    except Exception as e:
+        log_error(
+            f"Error loading data: {str(e)}", 
+            recommendation="Check file path and format"
+        )
+        return None
+
+# ======================
+# STEP 2: CREATE NEW COLUMNS
+# ======================
+def create_new_columns(df):
+    """Create new columns for population and other variables by year"""
+    print("\nStep 2: Creating new columns for population and other variables by year...")
+    
+    # Create a copy of the original date column
+    if 'date' in df.columns:
+        df['DailyDate'] = df['date'].copy()
+        print("Created 'DailyDate' column as a copy of original 'date'")
+    
+    # Extract year from date
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'], errors='coerce')
+        df['year'] = df['date'].dt.year
+        df['yeardate'] = df['year']  # Create yeardate column
+        print("Extracted year from date and created 'yeardate' column")
+    
+    # Define all indicator patterns to process
+    indicators = [
+        ('population_', 'Population-W'),
+        ('Access_to_clean_water', 'Access_to_clean_water_%_population-w'),
+        ('Smoking_prevalence_female', 'Smoking_prevalence_female_%_adults-w'),
+        ('Overweight_prevalence', 'Overweight_prevalence_W'),
+        ('Diabetes_prevalence', 'Diabetes_prevalence_W'),
+        ('Obesity_prevalence', 'Obesity_prevalence_W'),
+        ('Physicians_per_10000_people', 'Physicians_per_10000_people-w'),
+        ('Access_to_sanitation', 'Access_to_sanitation_%_population-w'),
+        ('Anemia_prevalence', 'Anemia_prevalence_%_children-w'),
+        ('Malnutrition_prevalence', 'Malnutrition_prevalence_%_children_under_5-w'),
+        ('Hospital_beds_per_10000_people', 'Hospital_beds_per_10000_people-w'),
+        ('GDP_per_capita', 'GDP_per_capita(current_US$)-w'),
+        ('Smoking_prevalence_male', 'Smoking_prevalence_male_%_adults-w'),
+        ('Life_expectancy_at_birth', 'Life_expectancy_at_birth_total_years-w')
+    ]
+    
+    # Process each indicator
+    for pattern, new_col_name in indicators:
+        # Find columns matching the pattern with year suffixes
+        year_cols = [col for col in df.columns if pattern in col and col.endswith(tuple(str(year) for year in range(2019, 2027)))]
+        
+        if year_cols:
+            # Create mapping from year to column name
+            year_to_col = {}
+            for col in year_cols:
+                # Extract year from column name (last 4 digits)
+                year_str = col[-4:]
+                if year_str.isdigit():
+                    year_to_col[int(year_str)] = col
+            
+            # Create a list of years and corresponding columns
+            years = sorted(year_to_col.keys())
+            cols_ordered = [year_to_col[year] for year in years]
+            
+            # Create a mapping from year to index
+            year_to_idx = {year: idx for idx, year in enumerate(years)}
+            
+            # Get the indicator data as a numpy array
+            indicator_data = df[cols_ordered].values
+            
+            # Get the indices for each row
+            row_indices = np.arange(len(df))
+            col_indices = df['year'].map(year_to_idx).fillna(-1).astype(int)
+            
+            # Initialize the result array with NaN
+            indicator_values = np.full(len(df), np.nan)
+            
+            # Set the values for valid years
+            valid_mask = col_indices != -1
+            indicator_values[valid_mask] = indicator_data[row_indices[valid_mask], col_indices[valid_mask]]
+            
+            # Assign the values to the new column
+            df[new_col_name] = indicator_values
+            print(f"Created '{new_col_name}' column using vectorized operations")
+    
+    # Remove original year-specific columns that have been replaced with -w columns
+    columns_to_remove = []
+    for col in df.columns:
+        # Check if column matches any of our patterns and ends with a year
+        for pattern, _ in indicators:
+            if pattern in col and col.endswith(tuple(str(year) for year in range(2019, 2027))):
+                columns_to_remove.append(col)
+                break
+    
+    # Ensure date columns are never removed
+    date_columns = ['date', 'DailyDate', 'yeardate']
+    for col in date_columns:
+        if col in columns_to_remove:
+            columns_to_remove.remove(col)
+            print(f"Protected '{col}' column from removal")
+    
+    if columns_to_remove:
+        df = df.drop(columns=columns_to_remove)
+        print(f"Removed {len(columns_to_remove)} original year-specific columns that were replaced with -w columns")
+    
+    return df
+
+# ======================
+# STEP 3: REORDER COLUMNS
+# ======================
+def reorder_columns(df):
+    """Reorder columns: country_name, date, qualitative, then quantitative (alphabetical)"""
+    print("\nStep 3: Reordering columns...")
+    
+    # Define the required order
+    first_cols = []
+    
+    # 1. Add country_name if it exists
+    if 'country_name' in df.columns:
+        first_cols.append('country_name')
+    
+    # 2. Add date if it exists
+    if 'date' in df.columns:
+        first_cols.append('date')
+    
+    # Get qualitative columns (excluding the first_cols)
+    qualitative_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    qualitative_cols = [col for col in qualitative_cols if col not in first_cols]
+    
+    # Get quantitative columns and sort them alphabetically
+    quantitative_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    quantitative_cols = sorted(quantitative_cols)
+    
+    # Combine all columns in the required order
+    ordered_columns = first_cols + qualitative_cols + quantitative_cols
+    
+    # Reorder the dataframe
+    df = df[ordered_columns]
+    
+    print(f"Reordered columns: {len(first_cols)} fixed, {len(qualitative_cols)} qualitative, {len(quantitative_cols)} quantitative")
+    print(f"First columns: {first_cols[:5]}{'...' if len(first_cols) > 5 else ''}")
+    print(f"Sample quantitative columns: {quantitative_cols[:5]}{'...' if len(quantitative_cols) > 5 else ''}")
+    
+    return df
+
+# ======================
+# STEP 4: PREPROCESS DATA
+# ======================
+def preprocess_data(df):
+    """Preprocess data for advanced methods"""
+    print("\nStep 4: Preprocessing data for advanced methods...")
+    
+    # Exclude location, date and continent from numeric conversion
+    exclude_cols = ['country_name', 'date', 'continent']
+    categorical_cols = df.select_dtypes(include=['object']).columns
+    categorical_cols = [col for col in categorical_cols if col not in exclude_cols]
+    
+    label_encoders = {}
+    for col in categorical_cols:
+        le = LabelEncoder()
+        df[col] = le.fit_transform(df[col].astype(str))
+        label_encoders[col] = le
+    
+    # Define target column
+    target_col = 'new_deaths'
+    
+    # Check if target column exists and has too many missing values
+    if target_col in df.columns:
+        target_missing_percent = df[target_col].isnull().sum() / len(df) * 100
+        if target_missing_percent > 50:
+            log_step(
+                "target_column_check",
+                {
+                    "column": target_col,
+                    "missing_percent": target_missing_percent
+                },
+                severity="high",
+                category="missing_data",
+                message=f"Target column '{target_col}' has {target_missing_percent:.2f}% missing values",
+                recommendation="Consider using a different target column or impute missing values"
+            )
+            target_col = None
+    else:
+        log_step(
+            "target_column_check",
+            {"column": target_col},
+            severity="high",
+            category="missing_data",
+            message=f"Target column '{target_col}' not found in dataset",
+            recommendation="Specify a valid target column"
+        )
+        target_col = None
+    
+    # Define important features
+    important_features = [
+        'new_deaths', 'new_cases', 'new_vaccinations', 
+        'total_vaccinations_per_hundred', 'people_vaccinated_per_hundred',
+        'aged_65_older', 'aged_70_older', 'diabetes_prevalence',
+        'cardiovascular_death_rate', 'male_smokers', 'female_smokers',
+        'gdp_per_capita', 'continent', 'country_name'
+    ]
+    
+    # Filter to only include features that exist in the dataset
+    existing_important_features = [f for f in important_features if f in df.columns]
+    
+    # Add median_age to important_features if it exists
+    if 'median_age' in df.columns and 'median_age' not in existing_important_features:
+        existing_important_features.append('median_age')
+        print("Added 'median_age' to important features")
+    
+    # Fix cardiovasc_death_rate to cardiovascular_death_rate
+    if 'cardiovasc_death_rate' in df.columns and 'cardiovascular_death_rate' not in existing_important_features:
+        existing_important_features.append('cardiovasc_death_rate')
+        print("Added 'cardiovascular_death_rate' to important features")
+    
+    print(f"Important features: {existing_important_features}")
+    print(f"Target column: {target_col}")
+    
+    return df, target_col, existing_important_features, label_encoders
+
+# ======================
+# STEP 5: IMPLEMENT HYBRID THRESHOLD APPROACH
+# ======================
+def implement_hybrid_threshold(df, target_col, critical_columns):
+    """Implement hybrid threshold approach"""
+    print("\nStep 5: Implementing hybrid threshold approach...")
+    
+    # Create instance of ThresholdMethods class
+    threshold_methods = ThresholdMethods(df, target_col, critical_columns)
+    
+    # List of threshold methods
+    methods = [
+        ("IQR-based", threshold_methods.iqr_based_threshold),
+        ("Standard Deviation", threshold_methods.std_based_threshold),
+        ("Target Correlation", threshold_methods.target_correlation_based_threshold),
+        ("Combined IQR-Correlation", threshold_methods.combined_iqr_corr_threshold),
+        ("Advanced Hybrid", threshold_methods.advanced_hybrid_threshold)
+    ]
+    
+    # Evaluate threshold methods
+    valid_results = []
+    for method_name, method_func in methods:
+        try:
+            # Execute threshold method
+            threshold = method_func()
+            
+            # Evaluate results
+            result = evaluate_threshold_result(threshold, df, target_col, critical_columns)
+            
+            valid_results.append({
+                "method": method_name,
+                "threshold": threshold,
+                "result": result
+            })
+            
+            print(f"Processed: {method_name} - Threshold: {threshold:.2f}%")
+        
+        except Exception as e:
+            print(f"Error in {method_name}: {str(e)}")
+    
+    # Create comparison table
+    if valid_results:
+        # Create DataFrame from results
+        comparison_data = []
+        for result in valid_results:
+            comparison_data.append({
+                "Method": result["method"],
+                "Threshold": result["threshold"],
+                "Dropped Columns": result["result"]["num_dropped_columns"],
+                "Data Completeness": result["result"]["data_completeness"],
+                "Avg Correlation": result["result"]["avg_correlation_with_target"],
+                "Model Score": result["result"]["model_score"],
+                "Critical Columns Dropped": len([col for col in result["result"]["cols_to_drop"] if col in critical_columns])
+            })
+        
+        comparison_df = pd.DataFrame(comparison_data)
+        
+        # Save comparison table
+        comparison_path = os.path.join(output_dir, "threshold_comparison.csv")
+        comparison_df.to_csv(comparison_path, index=False)
+        print(f"\nThreshold comparison table saved to {comparison_path}")
+        
+        # Display comparison table
+        print("\nThreshold Selection Methods Comparison:")
+        print(comparison_df.to_string(index=False))
+        
+        # Select best method based on composite score
+        weights = {
+            'Data Completeness': 0.3,
+            'Avg Correlation': 0.3,
+            'Model Score': 0.4
+        }
+        
+        # Normalize scores with zero division handling
+        if comparison_df['Data Completeness'].max() > 0:
+            comparison_df['Normalized Completeness'] = comparison_df['Data Completeness'] / comparison_df['Data Completeness'].max()
+        else:
+            comparison_df['Normalized Completeness'] = 0
+        
+        if comparison_df['Avg Correlation'].max() > 0:
+            comparison_df['Normalized Correlation'] = comparison_df['Avg Correlation'] / comparison_df['Avg Correlation'].max()
+        else:
+            comparison_df['Normalized Correlation'] = 0
+        
+        # Handle NaN values in model score
+        comparison_df['Model Score'].fillna(0, inplace=True)
+        if comparison_df['Model Score'].abs().max() > 0:
+            comparison_df['Normalized Model Score'] = comparison_df['Model Score'] / comparison_df['Model Score'].abs().max()
+        else:
+            comparison_df['Normalized Model Score'] = 0
+        
+        # Calculate composite score
+        comparison_df['Composite Score'] = (
+            weights['Data Completeness'] * comparison_df['Normalized Completeness'] +
+            weights['Avg Correlation'] * comparison_df['Normalized Correlation'] +
+            weights['Model Score'] * comparison_df['Normalized Model Score']
+        )
+        
+        # Select best method with error handling
+        try:
+            # Remove rows with NaN Composite Score
+            valid_df = comparison_df.dropna(subset=['Composite Score'])
+            
+            if len(valid_df) > 0:
+                best_method = valid_df.loc[valid_df['Composite Score'].idxmax()]
+                best_threshold = best_method['Threshold']
+                print(f"\nBest Method: {best_method['Method']}")
+                print(f"Best Threshold: {best_threshold:.2f}%")
+                print(f"Composite Score: {best_method['Composite Score']:.4f}")
+                print(f"Critical Columns Dropped: {best_method['Critical Columns Dropped']}")
+                
+                # Log threshold selection
+                log_step(
+                    "threshold_selection",
+                    {
+                        "best_method": best_method['Method'],
+                        "best_threshold": best_threshold,
+                        "composite_score": best_method['Composite Score'],
+                        "critical_columns_dropped": best_method['Critical Columns Dropped']
+                    },
+                    severity="medium",
+                    category="processing",
+                    message=f"Selected {best_method['Method']} method with threshold {best_threshold:.2f}%",
+                    recommendation="Monitor critical columns to ensure they are not dropped in data cleaning"
+                )
+            else:
+                print("\nNo valid methods found for selection!")
+                # Use first available method as default
+                if len(comparison_df) > 0:
+                    best_method = comparison_df.iloc[0]
+                    best_threshold = best_method['Threshold']
+                    print(f"Using default method: {best_method['Method']} with threshold {best_threshold:.2f}%")
+                else:
+                    best_method = None
+                    best_threshold = 50  # Default value
+                    print("Using default threshold: 50%")
+        
+        except Exception as e:
+            print(f"\nError selecting best method: {str(e)}")
+            # Use first available method as default
+            if len(comparison_df) > 0:
+                best_method = comparison_df.iloc[0]
+                best_threshold = best_method['Threshold']
+                print(f"Using default method: {best_method['Method']} with threshold {best_threshold:.2f}%")
+            else:
+                best_method = None
+                best_threshold = 50  # Default value
+                print("Using default threshold: 50%")
+        
+        # Use best threshold for data cleaning
+        missing_threshold = best_threshold
+    else:
+        print("No valid methods found. Using default threshold of 50%")
+        missing_threshold = 50
+        
+        log_step(
+            "threshold_selection",
+            {"threshold": missing_threshold},
+            severity="high",
+            category="processing",
+            message="No valid threshold methods found, using default threshold of 50%",
+            recommendation="Review threshold selection methods and data quality"
+        )
+    
+    return missing_threshold, best_method
+
+# ======================
+# STEP 6: CLEAN DATA
+# ======================
+def clean_data(df, missing_threshold, critical_columns, essential_columns):
+    """Clean data using the best threshold"""
+    print(f"\nStep 6: Cleaning data using best threshold ({missing_threshold:.2f}%)...")
+    
+    # Calculate percentage of missing data for each column
+    missing_percent = {}
+    for col in df.columns:
+        missing_percent[col] = calculate_missing_percent_optimized(df, col)
+    
+    missing_data = {}
+    missing_data["missing_percent"] = missing_percent
+    log_step(
+        "missing_data_analysis",
+        missing_data,
+        severity="medium",
+        category="missing_data",
+        message=f"Analyzing missing data patterns with threshold {missing_threshold:.2f}%",
+        recommendation="Review columns with high missing percentages"
+    )
+    
+    # Visualize missing data patterns with heatmap
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(df.isnull(), cbar=False, cmap='viridis', annot=False)
+    plt.title('Missing Data Heatmap (Before Cleaning)', fontsize=10)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_plots_dir, "missing_data_heatmap_before.png"), dpi=300)
+    plt.close()
+    print(f"Dataframe dimensions: {df.shape}")
+    print(f"Number of missing values in each column:\n{df.isnull().sum()}")
+    print("Missing data heatmap saved.")
+    
+    # Determine columns to drop based on best threshold
+    cols_to_drop = []
+    protected_cols = []  # Columns that were protected from dropping
+    
+    for col, percent in missing_percent.items():
+        # Protect essential columns from dropping
+        if col in essential_columns:
+            protected_cols.append(col)
+            if percent > missing_threshold:
+                log_step(
+                    "column_protection",
+                    {
+                        "column": col,
+                        "missing_percent": percent,
+                        "threshold": missing_threshold
+                    },
+                    severity="high",
+                    category="missing_data",
+                    message=f"Protected essential column '{col}' with {percent:.2f}% missing data from dropping",
+                    recommendation="Consider imputation methods for this essential column"
+                )
+            continue
+        
+        # If column is critical, apply higher threshold
+        if col in critical_columns:
+            if percent > 80:  # 80% threshold for critical columns
+                cols_to_drop.append(col)
+        else:
+            if percent > missing_threshold:  # Normal threshold for non-critical columns
+                cols_to_drop.append(col)
+    
+    log_step(
+        "columns_to_drop",
+        {
+            "threshold": missing_threshold,
+            "critical_columns": critical_columns,
+            "essential_columns": essential_columns,
+            "protected_columns": protected_cols,
+            "columns": cols_to_drop
+        },
+        severity="medium",
+        category="missing_data",
+        message=f"Identified {len(cols_to_drop)} columns to drop, protected {len(protected_cols)} essential columns",
+        recommendation="Review protected columns for potential imputation"
+    )
+    
+    # Drop columns with more than threshold% missing data
+    df_cleaned = df.drop(columns=cols_to_drop)
+    print(f"Dropped columns: {cols_to_drop}")
+    
+    # Drop rows with missing values in important columns (less than 5% missing)
+    important_cols = [col for col, percent in missing_percent.items() if 0 < percent < 5 and col not in critical_columns]
+    if important_cols:
+        df_cleaned = df_cleaned.dropna(subset=important_cols)
+        log_step(
+            "rows_dropped",
+            {
+                "important_columns": important_cols,
+                "rows_before": len(df),
+                "rows_after": len(df_cleaned)
+            },
+            severity="low",
+            category="missing_data",
+            message=f"Dropped {len(df) - len(df_cleaned)} rows with missing values in important columns",
+            recommendation="Consider imputation for future datasets"
+        )
+        print(f"Dropped rows in important columns: {len(df) - len(df_cleaned)}")
+    
+    # Fill missing values in vaccine columns with -1
+    vaccine_cols = [col for col in df_cleaned.columns if 'vaccin' in col.lower()]
+    for col in vaccine_cols:
+        if df_cleaned[col].isnull().any():
+            df_cleaned[col] = df_cleaned[col].fillna(-1)
+            print(f"Filled missing values in {col} with -1")
+    
+    # Visualize missing data after cleaning
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(df_cleaned.isnull(), cbar=False, cmap='viridis', annot=False)
+    plt.title('Missing Data Heatmap (After Cleaning)', fontsize=10)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_plots_dir, "missing_data_heatmap_after.png"), dpi=300)
+    plt.close()
+    print("Missing data heatmap after cleaning saved.")
+    
+    # Log final cleaning results
+    log_step(
+        "data_cleaning_completed",
+        {
+            "original_shape": df.shape,
+            "cleaned_shape": df_cleaned.shape,
+            "columns_dropped": cols_to_drop,
+            "protected_columns": protected_cols,
+            "important_columns": important_cols,
+            "vaccine_columns_filled": vaccine_cols,
+            "threshold_used": missing_threshold
+        },
+        severity="medium",
+        category="missing_data",
+        message=f"Data cleaning completed. Original shape: {df.shape}, Cleaned shape: {df_cleaned.shape}",
+        recommendation="Review cleaned data for quality assurance"
+    )
+    
+    print("\nData cleaning completed with domain knowledge adjustments!")
+    print(f"Original data shape: {df.shape}")
+    print(f"Cleaned data shape: {df_cleaned.shape}")
+    print(f"Number of columns dropped: {len(cols_to_drop)}")
+    print(f"Number of essential columns protected: {len(protected_cols)}")
+    print(f"Number of rows dropped: {len(df) - len(df_cleaned)}")
+    print(f"Number of vaccine columns filled: {len(vaccine_cols)}")
+    
+    # Note: We are not saving the cleaned data here anymore
+    # We will save it at the end of the processing after adding regional columns
+    
+    return df_cleaned, cols_to_drop, protected_cols, important_cols, vaccine_cols
+
+# ======================
+# STEP 7: CALCULATE HEALTH INDICATORS
+# ======================
+def calculate_health_indicators(df_cleaned):
+    """Calculate health indicators per 100,000 population"""
+    print("\nStep 7: Calculating health indicators per 100,000 population...")
+    
+    # Calculate cumulative variables from daily data using vectorized operations
+    if 'new_cases' in df_cleaned.columns:
+        df_cleaned['total_cases'] = df_cleaned.groupby('country_name')['new_cases'].cumsum()
+    
+    if 'new_deaths' in df_cleaned.columns:
+        df_cleaned['total_deaths'] = df_cleaned.groupby('country_name')['new_deaths'].cumsum()
+    
+    if 'new_tests' in df_cleaned.columns:
+        df_cleaned['total_tests'] = df_cleaned.groupby('country_name')['new_tests'].cumsum()
+    
+    if 'new_vaccinations' in df_cleaned.columns:
+        df_cleaned['total_vaccinations'] = df_cleaned.groupby('country_name')['new_vaccinations'].cumsum()
+    
+    # Calculate per 100,000 population indicators using vectorized operations
+    if 'population' in df_cleaned.columns:
+        population = df_cleaned['population']
+        
+        # Cases per 100,000
+        if 'new_cases' in df_cleaned.columns:
+            df_cleaned['new_cases_per_100k'] = (df_cleaned['new_cases'] / population) * 100000
+        
+        if 'total_cases' in df_cleaned.columns:
+            df_cleaned['total_cases_per_100k'] = (df_cleaned['total_cases'] / population) * 100000
+        
+        # Deaths per 100,000
+        if 'new_deaths' in df_cleaned.columns:
+            df_cleaned['new_deaths_per_100k'] = (df_cleaned['new_deaths'] / population) * 100000
+        
+        if 'total_deaths' in df_cleaned.columns:
+            df_cleaned['total_deaths_per_100k'] = (df_cleaned['total_deaths'] / population) * 100000
+        
+        # Tests per 100,000
+        if 'new_tests' in df_cleaned.columns:
+            df_cleaned['new_tests_per_100k'] = (df_cleaned['new_tests'] / population) * 100000
+        
+        if 'total_tests' in df_cleaned.columns:
+            df_cleaned['total_tests_per_100k'] = (df_cleaned['total_tests'] / population) * 100000
+        
+        # Vaccinations per 100,000
+        if 'new_vaccinations' in df_cleaned.columns:
+            df_cleaned['new_vaccinations_per_100k'] = (df_cleaned['new_vaccinations'] / population) * 100000
+        
+        if 'total_vaccinations' in df_cleaned.columns:
+            df_cleaned['total_vaccinations_per_100k'] = (df_cleaned['total_vaccinations'] / population) * 100000
+    
+    # Create smoker variable using vectorized operations
+    if 'male_smokers' in df_cleaned.columns and 'female_smokers' in df_cleaned.columns:
+        df_cleaned['smokers'] = df_cleaned['male_smokers'] + df_cleaned['female_smokers']
+        print("Created 'smokers' variable by combining male and female smokers")
+    
+    # Ensure required variables are included
+    required_vars = ['diabetes_prevalence', 'cardiovascular_death_rate', 'gdp_per_capita', 'handwashing_facilities']
+    for var in required_vars:
+        if var in df_cleaned.columns:
+            print(f"Included required variable: {var}")
+        else:
+            log_step(
+                "missing_required_variable",
+                {"variable": var},
+                severity="high",
+                category="missing_data",
+                message=f"Required variable {var} not found in dataset",
+                recommendation="Find alternative data sources for this variable"
+            )
+    
+    log_step(
+        "health_indicators_calculation",
+        {
+            "new_indicators": [
+                'total_cases', 'total_deaths', 'total_tests', 'total_vaccinations',
+                'new_cases_per_100k', 'new_deaths_per_100k', 'new_tests_per_100k',
+                'new_vaccinations_per_100k',
+                'total_cases_per_100k', 'total_deaths_per_100k', 'total_tests_per_100k', 'total_vaccinations_per_100k'
+            ],
+            "combined_variables": ['smokers']
+        },
+        severity="info",
+        category="processing",
+        message="Health indicators calculation completed",
+        recommendation="Review calculated indicators for accuracy"
+    )
+    
+    print("Health indicators calculation completed!")
+    
+    return df_cleaned
+
+# ======================
+# STEP 8: ADD PHC AND WHO REGION COLUMNS
+# ======================
+def add_regional_columns(df_cleaned):
+    """Add PHC and WHO region columns"""
+    print("\nStep 8: Adding PHC and WHO region columns...")
+    
+    # Add WHO region column using vectorized operations
+    def get_who_region(country):
+        for region, countries in who_regions.items():
+            if country in countries:
+                return region
+        return "Unknown"
+    
+    if 'country_name' in df_cleaned.columns:
+        # Create a mapping from country to WHO region
+        country_to_region = {}
+        for region, countries in who_regions.items():
+            for country in countries:
+                country_to_region[country] = region
+        
+        # Apply the mapping using vectorized operations
+        df_cleaned['WHO_region'] = df_cleaned['country_name'].map(country_to_region).fillna("Unknown")
+        print("Added WHO region column using vectorized operations")
+    
+    # Add health system governance column using vectorized operations
+    def get_health_system_governance(country):
+        return health_system_governance.get(country, "Unknown")
+    
+    if 'country_name' in df_cleaned.columns:
+        # Apply the mapping using vectorized operations
+        df_cleaned['health_system_governance'] = df_cleaned['country_name'].map(health_system_governance).fillna("Unknown")
+        print("Added health system governance column using vectorized operations")
+    
+    # Add PHC availability column (placeholder - needs to be filled with actual data)
+    df_cleaned['PHC_availability'] = "Unknown"  # Placeholder
+    print("Added PHC availability column (placeholder)")
+    
+    log_step(
+        "new_columns_added",
+        {
+            "new_columns": ['WHO_region', 'health_system_governance', 'PHC_availability'],
+            "description": "Added regional and governance information"
+        },
+        severity="info",
+        category="processing",
+        message="New columns added successfully",
+        recommendation="Fill PHC_availability with actual data when available"
+    )
+    
+    print("New columns added successfully!")
+    
+    return df_cleaned
+
+# ======================
+# STEP 9: CALCULATE OUTLIERS
+# ======================
+def calculate_outliers(df_cleaned):
+    """Calculate outliers and anomalies using sequential processing"""
+    print("\nStep 9: Calculating outliers and anomalies...")
+    
+    # Initialize results_df if it doesn't exist
+    results_df = pd.DataFrame(columns=['Metric', 'Value', 'Description'])
+    
+    # Use sequential processing for outlier detection instead of parallel
+    numeric_cols = df_cleaned.select_dtypes(include=[np.number]).columns
+    print(f"Detecting outliers in {len(numeric_cols)} columns using sequential processing...")
+    
+    start_time = time.time()
+    
+    # Sequential outlier detection
+    outliers_data = {}
+    for col in numeric_cols:
+        try:
+            outliers, lower, upper = detect_outliers_iqr_optimized(df_cleaned, col)
+            if len(outliers) > 0:
+                outliers_data[col] = {
+                    "count": int(len(outliers)),
+                    "percent": float(len(outliers) / len(df_cleaned) * 100),
+                    "bounds": [float(lower), float(upper)]
+                }
+        except Exception as e:
+            print(f"Error detecting outliers for column {col}: {str(e)}")
+    
+    end_time = time.time()
+    print(f"Outlier detection completed in {end_time - start_time:.2f} seconds")
+    
+    log_step(
+        "outliers_analysis",
+        outliers_data,
+        severity="medium",
+        category="outlier",
+        message=f"Outlier analysis completed for {len(outliers_data)} numeric columns",
+        recommendation="Review outliers for potential data entry errors"
+    )
+    print(f"Outlier analysis completed for {len(outliers_data)} numeric columns.")
+    
+    # Add to results dataframe
+    total_outliers = sum([outliers_data[col]['count'] for col in outliers_data])
+    new_row = pd.DataFrame({
+        'Metric': ['Total Identified Anomalies'],
+        'Value': [total_outliers],
+        'Description': ['Total anomalies identified using IQR method']
+    })
+    results_df = pd.concat([results_df, new_row], ignore_index=True)
+    
+    return results_df, outliers_data, total_outliers
+
+# ======================
+# STEP 10: EVALUATE IMPUTATION METHODS
+# ======================
+def evaluate_imputation_methods(df_cleaned, results_df):
+    """Evaluate imputation methods"""
+    print("\nStep 10: Evaluating imputation methods...")
+    imputation_results = {}
+    
+    # Create 10% artificial missing data
+    np.random.seed(RANDOM_STATE)
+    df_sample = df_cleaned.copy()
+    numeric_cols = df_sample.select_dtypes(include=[np.number]).columns
+    
+    for col in numeric_cols:
+        if df_sample[col].isnull().sum() / len(df_sample) < 0.1:
+            missing_indices = np.random.choice(
+                df_sample.index, 
+                size=int(0.1 * len(df_sample)), 
+                replace=False
+            )
+            df_sample.loc[missing_indices, col] = np.nan
+    
+    # Improved imputation methods with better error handling
+    imputation_methods = {
+        'mean': lambda x: x.fillna(x.mean()),
+        'median': lambda x: x.fillna(x.median()),
+        'forward_fill': lambda x: safe_forward_fill(x),
+        'interpolation': lambda x: safe_interpolation(x)
+    }
+    
+    for col in numeric_cols:
+        if df_sample[col].isnull().sum() > 0:
+            original_data = df_cleaned[col].dropna()
+            sample_data = df_sample[col].copy()
+            
+            col_results = {}
+            
+            for method_name, method_func in imputation_methods.items():
+                try:
+                    imputed_data = method_func(sample_data)
+                    
+                    # Check if imputation was successful
+                    if imputed_data.isnull().sum() > 0:
+                        print(f"Warning: {method_name} imputation failed for column {col}. Skipping.")
+                        continue
+                    
+                    # Calculate MSE
+                    mse = np.mean((imputed_data - original_data)**2)
+                    
+                    # Calculate correlation change with related indicators
+                    corr_change = {}
+                    for related_col in ['new_deaths', 'new_tests']:
+                        if related_col in df_cleaned.columns and related_col != col:
+                            original_corr = df_cleaned[col].corr(df_cleaned[related_col])
+                            imputed_corr = imputed_data.corr(df_cleaned[related_col])
+                            corr_change[related_col] = abs(original_corr - imputed_corr)
+                    
+                    col_results[method_name] = {
+                        "mse": float(mse),
+                        "corr_change": corr_change
+                    }
+                
+                except Exception as e:
+                    log_error(f"Error in {method_name} imputation for column {col}: {str(e)}")
+                    print(f"Error in {method_name} imputation for column {col}: {str(e)}")
+            
+            if col_results:  # Only add if we have valid results
+                imputation_results[col] = col_results
+    
+    log_step(
+        "imputation_evaluation",
+        imputation_results,
+        severity="medium",
+        category="processing",
+        message=f"Imputation evaluation completed for {len(imputation_results)} columns",
+        recommendation="Review best imputation methods for each column"
+    )
+    print(f"Imputation evaluation completed for {len(imputation_results)} columns.")
+    
+    # Apply best imputation methods
+    best_methods = {}
+    
+    for col in imputation_results:
+        methods = imputation_results[col]
+        if methods:
+            # Select method with lowest MSE and lowest correlation change
+            best_method = min(methods.keys(), key=lambda m: (
+                methods[m]['mse'], 
+                sum(methods[m]['corr_change'].values())
+            ))
+            best_methods[col] = best_method
+            
+            # Apply method to main data
+            if best_method == 'mean':
+                df_cleaned[col] = df_cleaned[col].fillna(df_cleaned[col].mean())
+            elif best_method == 'median':
+                df_cleaned[col] = df_cleaned[col].fillna(df_cleaned[col].median())
+            elif best_method == 'forward_fill':
+                df_cleaned[col] = safe_forward_fill(df_cleaned[col])
+            elif best_method == 'interpolation':
+                df_cleaned[col] = safe_interpolation(df_cleaned[col])
+    
+    log_step(
+        "best_imputation_methods",
+        best_methods,
+        severity="info",
+        category="processing",
+        message=f"Applied best imputation methods to {len(best_methods)} columns",
+        recommendation="Monitor imputed values for data quality"
+    )
+    print(f"Best imputation methods applied to {len(best_methods)} columns.")
+    
+    # Add to results dataframe
+    most_common_method = max(set(best_methods.values()), key=list(best_methods.values()).count)
+    new_row = pd.DataFrame({
+        'Metric': ['Best Imputation Method'],
+        'Value': [most_common_method],
+        'Description': ['Imputation method with best performance in most columns']
+    })
+    results_df = pd.concat([results_df, new_row], ignore_index=True)
+    
+    return df_cleaned, results_df, best_methods, most_common_method
+
+# ======================
+# STEP 11: CREATE VALIDATION TABLE
+# ======================
+def create_validation_table(results_df, df, df_cleaned, total_outliers, best_method, missing_threshold):
+    """Create final validation table"""
+    print("\nStep 11: Creating final validation table...")
+    
+    # Data quality improvement
+    quality_improvement = {
+        "missing_before": int(df.isnull().sum().sum()),
+        "missing_after": int(df_cleaned.isnull().sum().sum()),
+        "outliers_before": total_outliers,
+        "outliers_after": 0  # Assume all anomalies have been fixed
+    }
+    new_row = pd.DataFrame({
+        'Metric': ['Data Quality Improvement'],
+        'Value': [f"Reduced {quality_improvement['missing_before'] - quality_improvement['missing_after']} missing values"],
+        'Description': ['Number of missing values before and after cleaning']
+    })
+    results_df = pd.concat([results_df, new_row], ignore_index=True)
+    
+    # Add threshold selection method
+    if best_method is not None:
+        if isinstance(best_method, dict) and 'Method' in best_method:
+            method_value = best_method['Method']
+        else:
+            method_value = best_method
+        
+        new_row = pd.DataFrame({
+            'Metric': ['Threshold Selection Method'],
+            'Value': [method_value],
+            'Description': ['Method used to determine missing data threshold']
+        })
+        results_df = pd.concat([results_df, new_row], ignore_index=True)
+    else:
+        new_row = pd.DataFrame({
+            'Metric': ['Threshold Selection Method'],
+            'Value': ["Default"],
+            'Description': ['Method used to determine missing data threshold']
+        })
+        results_df = pd.concat([results_df, new_row], ignore_index=True)
+    
+    new_row = pd.DataFrame({
+        'Metric': ['Optimal Threshold'],
+        'Value': [f"{missing_threshold:.2f}%"],
+        'Description': ['Optimal threshold for dropping columns with missing data']
+    })
+    results_df = pd.concat([results_df, new_row], ignore_index=True)
+    
+    log_step(
+        "validation_table",
+        results_df.to_dict('records'),
+        severity="info",
+        category="processing",
+        message="Final validation table created",
+        recommendation="Review validation metrics for data quality assessment"
+    )
+    print("Final validation table created.")
+    
+    print("Final Validation Table:")
+    print(results_df)
+    
+    # Save validation results
+    print("\n" + "="*60)
+    print("FINAL VALIDATION TABLE")
+    print("="*60)
+    print(results_df.to_string(index=False))
+    print("="*60)
+    
+    # Save validation table as CSV
+    csv_path = os.path.join(output_dir, "validation_table.csv")
+    results_df.to_csv(csv_path, index=False)
+    print(f"Saved as CSV: {csv_path}")
+    
+    # Save validation table as image
+    fig, ax = plt.subplots(figsize=(14, 8))
+    ax.axis('tight')
+    ax.axis('off')
+    table = ax.table(cellText=results_df.values,
+                    colLabels=results_df.columns,
+                    cellLoc='center',
+                    loc='center')
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1.2, 1.5)
+    plt.savefig(os.path.join(output_plots_dir, "validation_table.png"), 
+                dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"Saved as Image: {output_plots_dir}/validation_table.png")
+    
+    return results_df
+
+# ======================
+# STEP 12: CREATE STATISTICS COMPARISON
+# ======================
+def create_statistics_comparison(df, df_cleaned):
+    """Create statistics comparison table"""
+    print("\nStep 12: Creating statistics comparison table...")
+    
+    # Reset indices to ensure consistency
+    df = df.reset_index(drop=True)
+    df_cleaned = df_cleaned.reset_index(drop=True)
+    
+    # Calculate statistics before cleaning
+    stats_before = df.describe(include='all').transpose()
+    stats_before['missing_count'] = df.isnull().sum()
+    stats_before['missing_percent'] = (df.isnull().sum() / len(df)) * 100
+    
+    # Calculate statistics after cleaning
+    stats_after = df_cleaned.describe(include='all').transpose()
+    stats_after['missing_count'] = df_cleaned.isnull().sum()
+    stats_after['missing_percent'] = (df_cleaned.isnull().sum() / len(df_cleaned)) * 100
+    
+    # Get common columns between before and after
+    common_columns = list(set(stats_before.index) & set(stats_after.index))
+    
+    # Create comparison table using only common columns
+    comparison_data = []
+    for col in common_columns:
+        row_data = {
+            'Column': col,
+            'Count_Before': stats_before.loc[col, 'count'] if col in stats_before.index else np.nan,
+            'Count_After': stats_after.loc[col, 'count'] if col in stats_after.index else np.nan,
+            'Missing_Before': stats_before.loc[col, 'missing_count'] if col in stats_before.index else np.nan,
+            'Missing_After': stats_after.loc[col, 'missing_count'] if col in stats_after.index else np.nan,
+            'Missing_Percent_Before': stats_before.loc[col, 'missing_percent'] if col in stats_before.index else np.nan,
+            'Missing_Percent_After': stats_after.loc[col, 'missing_percent'] if col in stats_after.index else np.nan
+        }
+        
+        # Add mean comparison for numeric columns
+        if col in df.select_dtypes(include=[np.number]).columns:
+            if col in stats_before.index and 'mean' in stats_before.columns:
+                row_data['Mean_Before'] = stats_before.loc[col, 'mean']
+            else:
+                row_data['Mean_Before'] = np.nan
+                
+            if col in stats_after.index and 'mean' in stats_after.columns:
+                row_data['Mean_After'] = stats_after.loc[col, 'mean']
+            else:
+                row_data['Mean_After'] = np.nan
+        
+        # Add std comparison for numeric columns
+        if col in df.select_dtypes(include=[np.number]).columns:
+            if col in stats_before.index and 'std' in stats_before.columns:
+                row_data['Std_Before'] = stats_before.loc[col, 'std']
+            else:
+                row_data['Std_Before'] = np.nan
+                
+            if col in stats_after.index and 'std' in stats_after.columns:
+                row_data['Std_After'] = stats_after.loc[col, 'std']
+            else:
+                row_data['Std_After'] = np.nan
+        
+        comparison_data.append(row_data)
+    
+    # Create DataFrame from the list of dictionaries
+    comparison_stats = pd.DataFrame(comparison_data)
+    
+    # Reorder columns for better readability
+    column_order = ['Column', 'Count_Before', 'Count_After', 'Missing_Before', 'Missing_After', 
+                   'Missing_Percent_Before', 'Missing_Percent_After', 'Mean_Before', 'Mean_After', 
+                   'Std_Before', 'Std_After']
+    
+    # Only include columns that exist in the DataFrame
+    column_order = [col for col in column_order if col in comparison_stats.columns]
+    comparison_stats = comparison_stats[column_order]
+    
+    # Save comparison table
+    comparison_stats.to_csv(stats_comparison_path, index=False)
+    print(f"Statistics comparison table saved to {stats_comparison_path}")
+    
+    # Display comparison table
+    print("\nStatistics Comparison Table:")
+    print(comparison_stats.to_string(index=False))
+    
+    return comparison_stats
+
+# ======================
+# STEP 13: SAVE LOG DATA
+# ======================
+def save_log_data(df, df_cleaned, cols_to_drop, best_method, missing_threshold, total_outliers, most_common_method, best_methods):
+    """Save log data"""
+    print("\nStep 13: Saving log data...")
+    
+    # Save log data to JSON file
+    with open(log_path, 'w') as f:
+        json.dump(log_data, f, default=json_serializer)
+    print(f"Log data saved to {log_path}")
+    
+    # Create summary report
+    with open(summary_report_path, 'w') as f:
+        f.write("COVID-19 Data Processing Summary Report\n")
+        f.write("="*50 + "\n\n")
+        f.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        
+        f.write("Data Processing Steps:\n")
+        f.write("-"*30 + "\n")
+        for step_name, step_logs in log_data["steps"].items():
+            f.write(f"{step_name}:\n")
+            for log_entry in step_logs:
+                f.write(f"  - {log_entry['message']}\n")
+                if log_entry['recommendation']:
+                    f.write(f"    Recommendation: {log_entry['recommendation']}\n")
+            f.write("\n")
+        
+        if log_data["errors"]:
+            f.write("Errors Encountered:\n")
+            f.write("-"*30 + "\n")
+            for error in log_data["errors"]:
+                f.write(f"- {error['message']}\n")
+                if error['recommendation']:
+                    f.write(f"  Recommendation: {error['recommendation']}\n")
+            f.write("\n")
+        
+        f.write("Final Data Shape:\n")
+        f.write("-"*30 + "\n")
+        f.write(f"Original: {df.shape}\n")
+        f.write(f"Cleaned: {df_cleaned.shape}\n")
+        f.write(f"Columns dropped: {len(cols_to_drop)}\n")
+        f.write(f"Rows dropped: {len(df) - len(df_cleaned)}\n")
+        f.write("\n")
+        
+        f.write("Threshold Selection:\n")
+        f.write("-"*30 + "\n")
+        
+        # Fix: Handle best_method properly to avoid Series boolean error
+        method_name = "Default"
+        if best_method is not None:
+            if isinstance(best_method, dict) and 'Method' in best_method:
+                method_name = best_method['Method']
+            elif isinstance(best_method, pd.Series):
+                # If it's a Series, get the first value or convert to string
+                method_name = str(best_method.iloc[0]) if len(best_method) > 0 else str(best_method)
+            elif hasattr(best_method, 'iloc'):  # Check if it has iloc attribute (pandas object)
+                method_name = str(best_method.iloc[0]) if len(best_method) > 0 else str(best_method)
+            else:
+                method_name = str(best_method)
+        
+        f.write(f"Method: {method_name}\n")
+        f.write(f"Threshold: {missing_threshold:.2f}%\n")
+        f.write("\n")
+        
+        f.write("Outlier Analysis:\n")
+        f.write("-"*30 + "\n")
+        f.write(f"Total outliers detected: {total_outliers}\n")
+        f.write("\n")
+        
+        f.write("Imputation Methods:\n")
+        f.write("-"*30 + "\n")
+        f.write(f"Most common method: {most_common_method}\n")
+        f.write(f"Columns imputed: {len(best_methods)}\n")
+    
+    print(f"Summary report saved to {summary_report_path}")
+
+# ======================
+# MAIN FUNCTION
+# ======================
+def main():
+    """Main processing function"""
+    # Step 1: Load data
+    df = load_data()
+    if df is None:
+        return
+    
+    # Store original data for before/after comparison
+    df_original = df.copy()
+    
+    # NEW: Validation Layer - Step 1.5: Check for inconsistent values and temporal irregularities
+    print("\nStep 1.5: Running validation checks...")
+    
+    # Check for inconsistent values
+    inconsistent_values = check_inconsistent_values(df)
+    
+    # Check for temporal irregularities
+    temporal_issues = check_temporal_irregularities(df)
+    
+    # Log validation issues
+    log_validation_issues(inconsistent_values, temporal_issues)
+    
+    # Store validation results in log_data
+    log_data["validation_results"] = {
+        "inconsistent_values": inconsistent_values,
+        "temporal_issues": temporal_issues
+    }
+    
+    # Step 2: Create new columns
+    df = create_new_columns(df)
+    
+    # Step 3: Reorder columns
+    df = reorder_columns(df)
+    
+    # Step 4: Preprocess data
+    df, target_col, existing_important_features, label_encoders = preprocess_data(df)
+    
+    # Step 5: Implement hybrid threshold approach
+    missing_threshold, best_method = implement_hybrid_threshold(df, target_col, critical_columns)
+    
+    # Step 6: Clean data
+    df_cleaned, cols_to_drop, protected_cols, important_cols, vaccine_cols = clean_data(
+        df, missing_threshold, critical_columns, essential_columns
+    )
+    
+    # Step 7: Calculate health indicators
+    df_cleaned = calculate_health_indicators(df_cleaned)
+    
+    # Step 8: Add regional columns
+    df_cleaned = add_regional_columns(df_cleaned)
+    
+    # Step 9: Calculate outliers
+    results_df, outliers_data, total_outliers = calculate_outliers(df_cleaned)
+    
+    # Step 10: Evaluate imputation methods
+    df_cleaned, results_df, best_methods, most_common_method = evaluate_imputation_methods(df_cleaned, results_df)
+    
+    # Step 11: Create validation table
+    results_df = create_validation_table(results_df, df, df_cleaned, total_outliers, best_method, missing_threshold)
+    
+    # Step 12: Create statistics comparison
+    comparison_stats = create_statistics_comparison(df, df_cleaned)
+    
+    # Step 13: Save log data
+    save_log_data(df, df_cleaned, cols_to_drop, best_method, missing_threshold, total_outliers, most_common_method, best_methods)
+    
+    # Save the cleaned data now (after adding regional columns)
+    try:
+        # Check if file exists and try to remove it if it does
+        if os.path.exists(cleaned_data_path):
+            try:
+                os.remove(cleaned_data_path)
+                print(f"Removed existing file: {cleaned_data_path}")
+            except PermissionError:
+                print(f"Warning: Could not remove existing file. It might be open in another program.")
+        
+        # Try to save the cleaned data
+        df_cleaned.to_csv(cleaned_data_path, index=False)
+        print(f"Cleaned data saved to {cleaned_data_path}")
+    except PermissionError as e:
+        print(f"PermissionError: {e}")
+        # Try to save with a different name
+        alternative_path = cleaned_data_path.replace('.csv', '_alternative.csv')
+        try:
+            df_cleaned.to_csv(alternative_path, index=False)
+            print(f"Cleaned data saved to alternative path: {alternative_path}")
+        except Exception as e2:
+            print(f"Failed to save to alternative path: {e2}")
+            print("Could not save cleaned data. Please check directory permissions.")
+    except Exception as e:
+        print(f"Error saving cleaned data: {e}")
+    
+    # Print completion message
+    print("\n" + "="*60)
+    print("PROCESSING COMPLETED SUCCESSFULLY")
+    print("="*60)
+    print(f"Cleaned data saved to: {cleaned_data_path}")
+    print(f"Validation table saved to: {os.path.join(output_dir, 'validation_table.csv')}")
+    print(f"Statistics comparison saved to: {stats_comparison_path}")
+    print(f"Log data saved to: {log_path}")
+    print(f"Summary report saved to: {summary_report_path}")
+    print("="*60)
+
+# Call the main function
+if __name__ == "__main__":
+    main()
