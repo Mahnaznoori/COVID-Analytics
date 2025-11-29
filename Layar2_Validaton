@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed Nov 12 22:39:38 2025
+Created on Tue Nov 18 10:00:22 2025
+
+@author: ASUS
 """
 
 # ======================
@@ -112,13 +114,13 @@ critical_columns = ['new_deaths', 'new_cases', 'new_vaccinations', 'total_vaccin
 
 # Define WHO regions dictionary
 who_regions = {
-    "AFRO": ["Algeria","Ivory Coast","Republic of the Congo","Cape Verde", "Angola", "Benin", "Botswana", "Burkina Faso", "Burundi", "Cabo Verde", "Cameroon", 
+    "AFRO": ["Algeria","SÃ£o TomÃ© and PrÃ­ncipe","Ivory Coast","Republic of the Congo","Cape Verde", "Angola", "Benin", "Botswana", "Burkina Faso", "Burundi", "Cabo Verde", "Cameroon", 
             "Central African Republic", "Chad", "Comoros", "Congo", "Côte d'Ivoire", "Democratic Republic of the Congo", 
             "Equatorial Guinea","Swaziland", "Eritrea", "Eswatini", "Ethiopia", "Gabon", "Gambia", "Ghana", "Guinea", 
             "Guinea-Bissau", "Kenya", "Lesotho", "Liberia", "Madagascar", "Malawi", "Mali", "Mauritania", "Mauritius", 
             "Mozambique","Tanzania", "Namibia", "Niger", "Nigeria", "Rwanda", "Sao Tome and Principe", "Senegal", "Seychelles", 
             "Sierra Leone", "South Africa", "South Sudan", "Togo", "Uganda", "United Republic of Tanzania", "Zambia", "Zimbabwe"],
-    "AMRO": ["Antigua and Barbuda", "SÃ£o TomÃ© and PrÃ­ncipe","Argentina", "Bahamas", "Barbados", "Belize", "Bolivia", "Brazil", "Canada", 
+    "AMRO": ["Antigua and Barbuda","Argentina", "Bahamas", "Barbados", "Belize", "Bolivia", "Brazil", "Canada", 
             "Chile", "Colombia", "Costa Rica", "Cuba", "Dominica", "Dominican Republic", "Ecuador", "El Salvador", 
             "Grenada", "Guatemala", "Guyana", "Haiti", "Honduras", "Jamaica", "Mexico", "Nicaragua", "Panama", 
             "Paraguay", "Peru", "Saint Kitts and Nevis", "Saint Lucia", "Saint Vincent and the Grenadines", 
@@ -160,6 +162,7 @@ health_system_governance = {
     "Oman": "Medium", "Jordan": "Medium", "Lebanon": "Medium", "Iraq": "Low", "Syria": "Low",
     "Yemen": "Low", "Libya": "Low", "Tunisia": "Medium", "Algeria": "Medium"
 }
+
 
 # ======================
 # HELPER FUNCTIONS
@@ -831,27 +834,30 @@ def create_new_columns(df):
     # Define all indicator patterns to process
     indicators = [
         ('population_', 'Population-W'),
-        ('Access_to_clean_water', 'Access_to_clean_water_%_population-w'),
-        ('Smoking_prevalence_female', 'Smoking_prevalence_female_%_adults-w'),
-        ('Overweight_prevalence', 'Overweight_prevalence_W'),
-        ('Diabetes_prevalence', 'Diabetes_prevalence_W'),
-        ('Obesity_prevalence', 'Obesity_prevalence_W'),
-        ('Physicians_per_10000_people', 'Physicians_per_10000_people-w'),
-        ('Access_to_sanitation', 'Access_to_sanitation_%_population-w'),
-        ('Anemia_prevalence', 'Anemia_prevalence_%_children-w'),
-        ('Malnutrition_prevalence', 'Malnutrition_prevalence_%_children_under_5-w'),
-        ('Hospital_beds_per_10000_people', 'Hospital_beds_per_10000_people-w'),
-        ('GDP_per_capita', 'GDP_per_capita(current_US$)-w'),
-        ('Smoking_prevalence_male', 'Smoking_prevalence_male_%_adults-w'),
-        ('Life_expectancy_at_birth', 'Life_expectancy_at_birth_total_years-w')
+        ('GDP_per_capita(current_US$)_', 'GDP_per_capita(current_US$)-W'),
+        ('Life_expectancy_at_birth_total_years_', 'Life_expectancy_at_birth_total_years-W'),
+        ('Diabetes_prevalence_%_ages_20_to_79_', 'Diabetes_prevalence_%_ages_20_to_79-W'),
+        ('Smoking_prevalence_female_%_adults_', 'Smoking_prevalence_female_%_adults-W'),
+        ('Smoking_prevalence_male_%_adults_', 'Smoking_prevalence_male_%_adults-W'),
+        ('Overweight_prevalence_%_adults_', 'Overweight_prevalence_%_adults-W'),
+        ('Obesity_prevalence_%_adults_', 'Obesity_prevalence_%_adults-W'),
+        ('HIV_prevalence_%_ages_15_to_49_', 'HIV_prevalence_%_ages_15_to_49-W'),
+        ('Malnutrition_prevalence_%_children_under_5_', 'Malnutrition_prevalence_%_children_under_5-W'),
+        ('Anemia_prevalence_%_children_', 'Anemia_prevalence_%_children-W'),
+        ('Access_to_clean_water_%_population_', 'Access_to_clean_water_%_population-W'),
+        ('Access_to_sanitation_%_population_', 'Access_to_sanitation_%_population-W'),
+        ('Hospital_beds_per_10000_people_', 'Hospital_beds_per_10000_people-W'),
+        ('Physicians_per_10000_people_', 'Physicians_per_10000_people-W')
     ]
     
     # Process each indicator
     for pattern, new_col_name in indicators:
         # Find columns matching the pattern with year suffixes
-        year_cols = [col for col in df.columns if pattern in col and col.endswith(tuple(str(year) for year in range(2019, 2027)))]
+        year_cols = [col for col in df.columns if col.startswith(pattern) and col[-4:].isdigit()]
         
         if year_cols:
+            print(f"Processing {pattern}: found {len(year_cols)} columns: {year_cols}")
+            
             # Create mapping from year to column name
             year_to_col = {}
             for col in year_cols:
@@ -866,6 +872,10 @@ def create_new_columns(df):
             
             # Create a mapping from year to index
             year_to_idx = {year: idx for idx, year in enumerate(years)}
+            
+            # Convert columns to numeric to ensure proper data type
+            for col in cols_ordered:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
             
             # Get the indicator data as a numpy array
             indicator_data = df[cols_ordered].values
@@ -884,13 +894,18 @@ def create_new_columns(df):
             # Assign the values to the new column
             df[new_col_name] = indicator_values
             print(f"Created '{new_col_name}' column using vectorized operations")
+            
+            # Debug: Print sample values for verification
+            sample_data = df[['country_name', 'year', new_col_name]].head(5)
+            print(f"Sample data for {new_col_name}:")
+            print(sample_data)
     
     # Remove original year-specific columns that have been replaced with -w columns
     columns_to_remove = []
     for col in df.columns:
         # Check if column matches any of our patterns and ends with a year
         for pattern, _ in indicators:
-            if pattern in col and col.endswith(tuple(str(year) for year in range(2019, 2027))):
+            if col.startswith(pattern) and col[-4:].isdigit():
                 columns_to_remove.append(col)
                 break
     
@@ -1338,95 +1353,96 @@ def clean_data(df, missing_threshold, critical_columns, essential_columns):
 # ======================
 # STEP 7: CALCULATE HEALTH INDICATORS
 # ======================
-def calculate_health_indicators(df_cleaned):
-    """Calculate health indicators per 100,000 population"""
-    print("\nStep 7: Calculating health indicators per 100,000 population...")
+#def calculate_health_indicators(df_cleaned):
+ #   """Calculate health indicators per 100,000 population"""
+  #  print("\nStep 7: Calculating health indicators per 100,000 population...")
+   # 
+    ## Calculate cumulative variables from daily data using vectorized operations
+   # if 'new_cases' in df_cleaned.columns:
+    #    df_cleaned['total_cases'] = df_cleaned.groupby('country_name')['new_cases'].cumsum()
     
-    # Calculate cumulative variables from daily data using vectorized operations
-    if 'new_cases' in df_cleaned.columns:
-        df_cleaned['total_cases'] = df_cleaned.groupby('country_name')['new_cases'].cumsum()
+   # if 'new_deaths' in df_cleaned.columns:
+    #    df_cleaned['total_deaths'] = df_cleaned.groupby('country_name')['new_deaths'].cumsum()
     
-    if 'new_deaths' in df_cleaned.columns:
-        df_cleaned['total_deaths'] = df_cleaned.groupby('country_name')['new_deaths'].cumsum()
+    #if 'new_tests' in df_cleaned.columns:
+     #   df_cleaned['total_tests'] = df_cleaned.groupby('country_name')['new_tests'].cumsum()
     
-    if 'new_tests' in df_cleaned.columns:
-        df_cleaned['total_tests'] = df_cleaned.groupby('country_name')['new_tests'].cumsum()
-    
-    if 'new_vaccinations' in df_cleaned.columns:
-        df_cleaned['total_vaccinations'] = df_cleaned.groupby('country_name')['new_vaccinations'].cumsum()
+   # if 'new_vaccinations' in df_cleaned.columns:
+    #    df_cleaned['total_vaccinations'] = df_cleaned.groupby('country_name')['new_vaccinations'].cumsum()
     
     # Calculate per 100,000 population indicators using vectorized operations
-    if 'population' in df_cleaned.columns:
-        population = df_cleaned['population']
+    #if 'population' in df_cleaned.columns:
+     #   population = df_cleaned['population']
         
         # Cases per 100,000
-        if 'new_cases' in df_cleaned.columns:
-            df_cleaned['new_cases_per_100k'] = (df_cleaned['new_cases'] / population) * 100000
+      #  if 'new_cases' in df_cleaned.columns:
+       #     df_cleaned['new_cases_per_100k'] = (df_cleaned['new_cases'] / population) * 100000
         
-        if 'total_cases' in df_cleaned.columns:
-            df_cleaned['total_cases_per_100k'] = (df_cleaned['total_cases'] / population) * 100000
+        #if 'total_cases' in df_cleaned.columns:
+         #   df_cleaned['total_cases_per_100k'] = (df_cleaned['total_cases'] / population) * 100000
         
         # Deaths per 100,000
-        if 'new_deaths' in df_cleaned.columns:
-            df_cleaned['new_deaths_per_100k'] = (df_cleaned['new_deaths'] / population) * 100000
+       # if 'new_deaths' in df_cleaned.columns:
+        #    df_cleaned['new_deaths_per_100k'] = (df_cleaned['new_deaths'] / population) * 100000
         
-        if 'total_deaths' in df_cleaned.columns:
-            df_cleaned['total_deaths_per_100k'] = (df_cleaned['total_deaths'] / population) * 100000
+        #if 'total_deaths' in df_cleaned.columns:
+         #   df_cleaned['total_deaths_per_100k'] = (df_cleaned['total_deaths'] / population) * 100000
         
         # Tests per 100,000
-        if 'new_tests' in df_cleaned.columns:
-            df_cleaned['new_tests_per_100k'] = (df_cleaned['new_tests'] / population) * 100000
+       # if 'new_tests' in df_cleaned.columns:
+        #    df_cleaned['new_tests_per_100k'] = (df_cleaned['new_tests'] / population) * 100000
         
-        if 'total_tests' in df_cleaned.columns:
-            df_cleaned['total_tests_per_100k'] = (df_cleaned['total_tests'] / population) * 100000
+        #if 'total_tests' in df_cleaned.columns:
+         #   df_cleaned['total_tests_per_100k'] = (df_cleaned['total_tests'] / population) * 100000
         
         # Vaccinations per 100,000
-        if 'new_vaccinations' in df_cleaned.columns:
-            df_cleaned['new_vaccinations_per_100k'] = (df_cleaned['new_vaccinations'] / population) * 100000
+       # if 'new_vaccinations' in df_cleaned.columns:
+        #    df_cleaned['new_vaccinations_per_100k'] = (df_cleaned['new_vaccinations'] / population) * 100000
         
-        if 'total_vaccinations' in df_cleaned.columns:
-            df_cleaned['total_vaccinations_per_100k'] = (df_cleaned['total_vaccinations'] / population) * 100000
+        #if 'total_vaccinations' in df_cleaned.columns:
+         #   df_cleaned['total_vaccinations_per_100k'] = (df_cleaned['total_vaccinations'] / population) * 100000
     
     # Create smoker variable using vectorized operations
-    if 'male_smokers' in df_cleaned.columns and 'female_smokers' in df_cleaned.columns:
-        df_cleaned['smokers'] = df_cleaned['male_smokers'] + df_cleaned['female_smokers']
-        print("Created 'smokers' variable by combining male and female smokers")
+   # if 'male_smokers' in df_cleaned.columns and 'female_smokers' in df_cleaned.columns:
+    #    df_cleaned['smokers'] = df_cleaned['male_smokers'] + df_cleaned['female_smokers']
+     #   print("Created 'smokers' variable by combining male and female smokers")
     
     # Ensure required variables are included
-    required_vars = ['diabetes_prevalence', 'cardiovascular_death_rate', 'gdp_per_capita', 'handwashing_facilities']
-    for var in required_vars:
-        if var in df_cleaned.columns:
-            print(f"Included required variable: {var}")
-        else:
-            log_step(
-                "missing_required_variable",
-                {"variable": var},
-                severity="high",
-                category="missing_data",
-                message=f"Required variable {var} not found in dataset",
-                recommendation="Find alternative data sources for this variable"
-            )
+   # required_vars = ['diabetes_prevalence', 'cardiovascular_death_rate', 'gdp_per_capita', 'handwashing_facilities']
+    #for var in required_vars:
+     #   if var in df_cleaned.columns:
+      #      print(f"Included required variable: {var}")
+       # else:
+        #    log_step(
+         #       "missing_required_variable",
+          #      {"variable": var},
+           #     severity="high",
+            #    category="missing_data",
+             #   message=f"Required variable {var} not found in dataset",
+              #  recommendation="Find alternative data sources for this variable"
+            #)
     
-    log_step(
-        "health_indicators_calculation",
-        {
-            "new_indicators": [
-                'total_cases', 'total_deaths', 'total_tests', 'total_vaccinations',
-                'new_cases_per_100k', 'new_deaths_per_100k', 'new_tests_per_100k',
-                'new_vaccinations_per_100k',
-                'total_cases_per_100k', 'total_deaths_per_100k', 'total_tests_per_100k', 'total_vaccinations_per_100k'
-            ],
-            "combined_variables": ['smokers']
-        },
-        severity="info",
-        category="processing",
-        message="Health indicators calculation completed",
-        recommendation="Review calculated indicators for accuracy"
-    )
+  #  log_step(
+   #     "health_indicators_calculation",
+    #    {
+     #       "new_indicators": [
+      #          'total_cases', 'total_deaths', 'total_tests', 'total_vaccinations',
+       #         'new_cases_per_100k', 'new_deaths_per_100k', 'new_tests_per_100k',
+        #        'new_vaccinations_per_100k',
+         #       'total_cases_per_100k', 'total_deaths_per_100k', 'total_tests_per_100k', 'total_vaccinations_per_100k'
+          #  ],
+           # "combined_variables": ['smokers']
+       # },
+        #severity="info",
+        #category="processing",
+        #message="Health indicators calculation completed",
+        #recommendation="Review calculated indicators for accuracy"
+    #)
     
-    print("Health indicators calculation completed!")
+    #print("Health indicators calculation completed!")
     
-    return df_cleaned
+    #return df_cleaned
+
 
 # ======================
 # STEP 8: ADD PHC AND WHO REGION COLUMNS
@@ -1437,9 +1453,47 @@ def add_regional_columns(df_cleaned):
     
     # Add WHO region column using vectorized operations
     def get_who_region(country):
+        # First try direct match
         for region, countries in who_regions.items():
             if country in countries:
                 return region
+        
+        # If no direct match, try to find a close match
+        # Handle special case for São Tomé and Príncipe
+        if "São Tomé" in country or "Sao Tome" in country or "SÃ£o TomÃ©" in country:
+            return "AFRO"
+        
+        # Handle other common variations
+        country_variations = {
+            "Côte d'Ivoire": "Cote d'Ivoire",
+            "Cabo Verde": "Cape Verde",
+            "Eswatini": "Swaziland",
+            "Democratic Republic of the Congo": "DR Congo",
+            "Congo": "Republic of the Congo",
+            "Czechia": "Czech Republic",
+            "Kyrgyzstan": "Kyrgyz Republic",
+            "Russian Federation": "Russia",
+            "United Republic of Tanzania": "Tanzania",
+            "United States of America": "United States",
+            "Venezuela (Bolivarian Republic of)": "Venezuela",
+            "Viet Nam": "Vietnam",
+            "Iran (Islamic Republic of)": "Iran",
+            "Syrian Arab Republic": "Syria"
+        }
+        
+        # Check if country is in variations
+        if country in country_variations:
+            standard_name = country_variations[country]
+            for region, countries in who_regions.items():
+                if standard_name in countries:
+                    return region
+        
+        # If still not found, try partial matching
+        for region, countries in who_regions.items():
+            for c in countries:
+                if country in c or c in country:
+                    return region
+        
         return "Unknown"
     
     if 'country_name' in df_cleaned.columns:
@@ -1450,8 +1504,22 @@ def add_regional_columns(df_cleaned):
                 country_to_region[country] = region
         
         # Apply the mapping using vectorized operations
-        df_cleaned['WHO_region'] = df_cleaned['country_name'].map(country_to_region).fillna("Unknown")
+        df_cleaned['WHO_region'] = df_cleaned['country_name'].map(country_to_region)
+        
+        # For countries not found in the mapping, use the custom function
+        mask = df_cleaned['WHO_region'].isna()
+        if mask.any():
+            df_cleaned.loc[mask, 'WHO_region'] = df_cleaned.loc[mask, 'country_name'].apply(get_who_region)
+        
         print("Added WHO region column using vectorized operations")
+        
+        # Verify that São Tomé and Príncipe is correctly assigned
+        sao_tome_mask = df_cleaned['country_name'].str.contains('São Tomé|Sao Tome|SÃ£o TomÃ©', na=False)
+        if sao_tome_mask.any():
+            sao_tome_region = df_cleaned.loc[sao_tome_mask, 'WHO_region'].iloc[0]
+            print(f"São Tomé and Príncipe assigned to: {sao_tome_region}")
+            if sao_tome_region != "AFRO":
+                print("WARNING: São Tomé and Príncipe not assigned to AFRO region!")
     
     # Add health system governance column using vectorized operations
     def get_health_system_governance(country):
@@ -1466,6 +1534,7 @@ def add_regional_columns(df_cleaned):
     df_cleaned['PHC_availability'] = "Unknown"  # Placeholder
     print("Added PHC availability column (placeholder)")
     
+    # Log the addition of new columns
     log_step(
         "new_columns_added",
         {
@@ -1477,6 +1546,13 @@ def add_regional_columns(df_cleaned):
         message="New columns added successfully",
         recommendation="Fill PHC_availability with actual data when available"
     )
+    
+    # Print summary of WHO regions
+    if 'WHO_region' in df_cleaned.columns:
+        region_counts = df_cleaned['WHO_region'].value_counts()
+        print("\nWHO Region Distribution:")
+        for region, count in region_counts.items():
+            print(f"  {region}: {count} records")
     
     print("New columns added successfully!")
     
@@ -1916,6 +1992,9 @@ def save_log_data(df, df_cleaned, cols_to_drop, best_method, missing_threshold, 
 # ======================
 # MAIN FUNCTION
 # ======================
+# ======================
+# MAIN FUNCTION
+# ======================
 def main():
     """Main processing function"""
     # Step 1: Load data
@@ -1962,7 +2041,7 @@ def main():
     )
     
     # Step 7: Calculate health indicators
-    df_cleaned = calculate_health_indicators(df_cleaned)
+    # df_cleaned = calculate_health_indicators(df_cleaned)  # این خط را کامنت کنید
     
     # Step 8: Add regional columns
     df_cleaned = add_regional_columns(df_cleaned)
