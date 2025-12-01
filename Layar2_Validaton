@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Tue Nov 18 10:00:22 2025
+Created on Mon Dec  1 08:25:35 2025
 
 @author: ASUS
 """
@@ -76,14 +76,24 @@ data_file = r"C:\Users\ASUS\Desktop\Barnabus\covid19_with_worldbank_indicators_w
 output_dir = r"C:\Users\ASUS\Desktop\Barnabus"
 output_plots_dir = os.path.join(output_dir, "output_plots")
 cleaned_data_path = os.path.join(output_dir, "cleaned_covid_data.csv")
-results_data_path = os.path.join(output_dir, "computational_results.csv")
-log_path = os.path.join(output_dir, "data_processing_log.json")
-summary_report_path = os.path.join(output_dir, "summary_report.txt")
-stats_comparison_path = os.path.join(output_dir, "statistics_comparison.csv")
+
+# Create ValidationData directory
+validation_dir = os.path.join(output_dir, "ValidationData")
+os.makedirs(validation_dir, exist_ok=True)
+
+# Update paths to save in ValidationData directory
+results_data_path = os.path.join(validation_dir, "computational_results.csv")
+log_path = os.path.join(validation_dir, "data_processing_log.json")
+summary_report_path = os.path.join(validation_dir, "summary_report.txt")
+stats_comparison_path = os.path.join(validation_dir, "statistics_comparison.csv")
+threshold_comparison_path = os.path.join(validation_dir, "threshold_comparison.csv")
+validation_table_csv_path = os.path.join(validation_dir, "validation_table.csv")
+validation_table_png_path = os.path.join(validation_dir, "validation_table.png")
 
 # Create output directories
 os.makedirs(output_dir, exist_ok=True)
 os.makedirs(output_plots_dir, exist_ok=True)
+os.makedirs(validation_dir, exist_ok=True)
 
 # ======================
 # GLOBAL DEFINITIONS
@@ -1093,7 +1103,7 @@ def implement_hybrid_threshold(df, target_col, critical_columns):
         comparison_df = pd.DataFrame(comparison_data)
         
         # Save comparison table
-        comparison_path = os.path.join(output_dir, "threshold_comparison.csv")
+        comparison_path = threshold_comparison_path
         comparison_df.to_csv(comparison_path, index=False)
         print(f"\nThreshold comparison table saved to {comparison_path}")
         
@@ -1805,7 +1815,7 @@ def create_validation_table(results_df, df, df_cleaned, total_outliers, best_met
     print("="*60)
     
     # Save validation table as CSV
-    csv_path = os.path.join(output_dir, "validation_table.csv")
+    csv_path = validation_table_csv_path
     results_df.to_csv(csv_path, index=False)
     print(f"Saved as CSV: {csv_path}")
     
@@ -1820,10 +1830,10 @@ def create_validation_table(results_df, df, df_cleaned, total_outliers, best_met
     table.auto_set_font_size(False)
     table.set_fontsize(10)
     table.scale(1.2, 1.5)
-    plt.savefig(os.path.join(output_plots_dir, "validation_table.png"), 
+    plt.savefig(validation_table_png_path, 
                 dpi=300, bbox_inches='tight')
     plt.close()
-    print(f"Saved as Image: {output_plots_dir}/validation_table.png")
+    print(f"Saved as Image: {validation_table_png_path}")
     
     return results_df
 
@@ -2092,10 +2102,7 @@ def main():
     print("PROCESSING COMPLETED SUCCESSFULLY")
     print("="*60)
     print(f"Cleaned data saved to: {cleaned_data_path}")
-    print(f"Validation table saved to: {os.path.join(output_dir, 'validation_table.csv')}")
-    print(f"Statistics comparison saved to: {stats_comparison_path}")
-    print(f"Log data saved to: {log_path}")
-    print(f"Summary report saved to: {summary_report_path}")
+    print(f"Validation data saved to: {validation_dir}")
     print("="*60)
 
 # Call the main function
